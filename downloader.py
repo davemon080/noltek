@@ -36,6 +36,7 @@ class VideoDownloaderBot:
             'noplaylist': True,
             'retries': 5,
             'progress_hooks': [self.download_progress_hook],
+             'cookiefile': 'cookies.txt'  # <-- Add this line
         }
 
         if format_choice == 'mp3':
