@@ -1,8 +1,7 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from downloader import VideoDownloaderBot
 import uuid
-import threading
 import os
 
 app = Flask(__name__)
@@ -10,11 +9,10 @@ CORS(app)
 
 bot = VideoDownloaderBot()
 
-# ✅ Optional homepage route to avoid 404
 @app.route("/")
 def home():
     return jsonify({"status": "Video Downloader API is live 🎉"})
-    
+
 @app.route("/download", methods=["POST"])
 def download_video():
     data = request.get_json()
@@ -25,19 +23,28 @@ def download_video():
     if not url:
         return jsonify({"error": "No URL provided"}), 400
 
+    # Create a unique folder
     folder = f"downloads/{uuid.uuid4()}/"
     os.makedirs(folder, exist_ok=True)
 
-    thread = threading.Thread(target=bot.download_single_video, kwargs={
-        "url": url,
-        "output_path": folder,
-        "format_choice": format_choice,
-        "resolution_choice": resolution_choice
-    })
-    thread.start()
+    # Download video now (synchronously)
+    file_path = bot.download_single_video(
+        url=url,
+        output_path=folder,
+        format_choice=format_choice,
+        resolution_choice=resolution_choice
+    )
 
-    return jsonify({"message": "Download started", "folder": folder})
+    if not os.path.exists(file_path):
+        return jsonify({"error": "Download failed"}), 500
+
+    # Send the file back to browser as download
+    return send_file(
+        file_path,
+        as_attachment=True,
+        download_name=os.path.basename(file_path),
+        mimetype='video/mp4'
+    )
 
 if __name__ == "__main__":
     app.run()
-
