@@ -52,7 +52,7 @@ class VideoDownloaderBot:
                 ydl_opts['merge_output_format'] = 'mp4'
                 print(f"Preparing to download video as MP4 (best quality) from: {url}")
 
-    try:
+ try:
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info_dict = ydl.extract_info(url, download=True)
         video_title = info_dict.get('title', 'video')
@@ -65,6 +65,7 @@ class VideoDownloaderBot:
 except Exception as e:
     print(f"Download failed: {str(e)}")
     return None, None
+
 
 
     def download_progress_hook(self, d):
