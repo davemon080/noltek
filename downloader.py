@@ -61,7 +61,7 @@ class VideoDownloaderBot:
                 full_path = os.path.abspath(final_path)
                 print(f"\nSuccessfully downloaded: {video_title} to {full_path}")
                   # Return the title (optional) and path
-return info_dict.get('title', 'video'), file_path
+return info_dict.get('title', 'video'), full_path
 # ✅ Return full path here
         except yt_dlp.utils.DownloadError as e:
             print(f"Error downloading {url}: {e}")
