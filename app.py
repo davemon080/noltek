@@ -10,6 +10,11 @@ CORS(app)
 
 bot = VideoDownloaderBot()
 
+# ✅ Optional homepage route to avoid 404
+@app.route("/")
+def home():
+    return jsonify({"status": "Video Downloader API is live 🎉"})
+    
 @app.route("/download", methods=["POST"])
 def download_video():
     data = request.get_json()
