@@ -52,23 +52,20 @@ class VideoDownloaderBot:
                 ydl_opts['merge_output_format'] = 'mp4'
                 print(f"Preparing to download video as MP4 (best quality) from: {url}")
 
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info_dict = ydl.extract_info(url, download=True)
-                video_title = info_dict.get('title', 'Unknown Title')
-                final_ext = 'mp3' if format_choice == 'mp3' else 'mp4'
-                final_path = os.path.join(output_path, f"{video_title}.{final_ext}")
-                full_path = os.path.abspath(final_path)
-                print(f"\nSuccessfully downloaded: {video_title} to {full_path}")
-                  # Return the title (optional) and path
-return full_path
-# ✅ Return full path here
-        except yt_dlp.utils.DownloadError as e:
-            print(f"Error downloading {url}: {e}")
-            return None
-        except Exception as e:
-            print(f"An unexpected error occurred during download of {url}: {e}")
-            return None
+    try:
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info_dict = ydl.extract_info(url, download=True)
+        video_title = info_dict.get('title', 'video')
+        final_ext = 'mp3' if format_choice == 'mp3' else 'mp4'
+        final_path = os.path.join(output_path, f"{video_title}.{final_ext}")
+        full_path = os.path.abspath(final_path)
+        print(f"Successfully downloaded: {video_title} to {full_path}")
+        return video_title, full_path
+
+except Exception as e:
+    print(f"Download failed: {str(e)}")
+    return None, None
+
 
     def download_progress_hook(self, d):
         if d['status'] == 'downloading':
