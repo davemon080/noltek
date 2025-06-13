@@ -1,16 +1,7 @@
-
 # Universal Video Downloader Bot
 #
 # This bot uses the 'yt-dlp' library to download videos from various online platforms.
-#
-# IMPORTANT:
-# 1. You MUST install the yt-dlp library: pip install yt-dlp
-# 2. This script requires an active internet connection.
-# 3. Download capabilities depend on yt-dlp's support for the given URL's platform.
-# 4. Respect copyright and terms of service of the platforms you download from.
-#    Use this tool responsibly and only for content you have the right to download.
-# 5. FFmpeg MUST be installed and in your system's PATH for merging video/audio
-#    and for converting audio to MP3.
+# Requires: yt-dlp, FFmpeg, and optionally a cookies.txt file for restricted videos.
 
 import yt_dlp
 import os
@@ -22,10 +13,10 @@ class VideoDownloaderBot:
         print("Video Downloader Bot initialized. Ready to download videos.")
 
     def download_single_video(self, url: str, output_path: str = "downloads/", format_choice: str = 'mp4', resolution_choice: str = None):
-        """Downloads a single video with specified format and resolution."""
+        """Downloads a single video with specified format and resolution and returns the file path."""
         if not url:
             print("Error: No URL provided for download.")
-            return
+            return None
 
         if not os.path.exists(output_path):
             os.makedirs(output_path)
@@ -36,7 +27,7 @@ class VideoDownloaderBot:
             'noplaylist': True,
             'retries': 5,
             'progress_hooks': [self.download_progress_hook],
-             'cookiefile': 'cookies.txt'  # <-- Add this line
+            'cookiefile': 'cookies.txt'  # Optional: for age-restricted/logged-in content
         }
 
         if format_choice == 'mp3':
@@ -44,7 +35,7 @@ class VideoDownloaderBot:
             ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
             ydl_opts['outtmpl'] = os.path.join(output_path, '%(title)s.mp3')
             print(f"Preparing to download audio as MP3 from: {url}")
-        else: # MP4
+        else:
             if resolution_choice:
                 resolution_map = {'480p': 480, '720p': 720, '1080p': 1080, '2k': 1440, '4k': 2160}
                 target_height = resolution_map.get(resolution_choice.lower())
@@ -67,11 +58,15 @@ class VideoDownloaderBot:
                 video_title = info_dict.get('title', 'Unknown Title')
                 final_ext = 'mp3' if format_choice == 'mp3' else 'mp4'
                 final_path = os.path.join(output_path, f"{video_title}.{final_ext}")
-                print(f"\nSuccessfully downloaded: {video_title} to {os.path.abspath(final_path)}")
+                full_path = os.path.abspath(final_path)
+                print(f"\nSuccessfully downloaded: {video_title} to {full_path}")
+                return full_path  # ✅ Return full path here
         except yt_dlp.utils.DownloadError as e:
             print(f"Error downloading {url}: {e}")
+            return None
         except Exception as e:
             print(f"An unexpected error occurred during download of {url}: {e}")
+            return None
 
     def download_progress_hook(self, d):
         if d['status'] == 'downloading':
@@ -117,10 +112,16 @@ def main():
                             print(f"Invalid resolution. Choose from: {available_resolutions}.")
 
                 threads = []
-                for url in urls_to_download[:10]: # Limit to 10
-                    thread = threading.Thread(target=downloader_bot.download_single_video,
-                                              args=(url,),
-                                              kwargs={'output_path': 'downloads/', 'format_choice': format_choice, 'resolution_choice': resolution_choice})
+                for url in urls_to_download[:10]:  # Limit to 10
+                    thread = threading.Thread(
+                        target=downloader_bot.download_single_video,
+                        args=(url,),
+                        kwargs={
+                            'output_path': 'downloads/',
+                            'format_choice': format_choice,
+                            'resolution_choice': resolution_choice
+                        }
+                    )
                     threads.append(thread)
                     thread.start()
 
@@ -128,7 +129,7 @@ def main():
                     thread.join()
 
                 print("\nAll downloads initiated have completed (or failed).")
-                urls_to_download = [] # Clear the list for the next batch
+                urls_to_download = []  # Reset queue
             else:
                 print("No URLs entered. Please enter video URLs before typing 'go'.")
         elif line:
