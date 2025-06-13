@@ -1,27 +1,34 @@
-from flask import Flask, request, jsonify, send_file
-from flask_cors import CORS
+from flask import Flask, request, send_file, jsonify
 from downloader import VideoDownloaderBot
-import uuid
 import os
+import uuid
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
-CORS(app)
-
 bot = VideoDownloaderBot()
 
-@app.route("/")
-def home():
-    return jsonify({"status": "Video Downloader API is live 🎉"})
+@app.route('/download', methods=['POST'])
+def download():
+    try:
+        data = request.get_json()
+        url = data.get('url')
+        format_choice = data.get('format', 'mp4')
+        resolution = data.get('resolution', 'best')
 
-@app.route("/download", methods=["POST"])
-def download_video():
-    data = request.get_json()
-    url = data.get("url")
-    format_choice = data.get("format", "mp4")
-    resolution_choice = data.get("resolution")
+        # Generate a unique filename and sanitize it
+        raw_title, file_path = bot.download(url, format=format_choice, resolution=resolution)
+        safe_filename = secure_filename(os.path.basename(file_path))
 
-    if not url:
-        return jsonify({"error": "No URL provided"}), 400
+        # Optional: rename file to safe version
+        safe_path = os.path.join(os.path.dirname(file_path), safe_filename)
+        if safe_path != file_path:
+            os.rename(file_path, safe_path)
+
+        return send_file(safe_path, as_attachment=True)
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
     # Create a unique folder
     folder = f"downloads/{uuid.uuid4()}/"
