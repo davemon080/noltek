@@ -34,10 +34,8 @@ def download_video():
         format_choice=format_choice,
         resolution_choice=resolution_choice
     )
-
-   if not file_path or not os.path.exists(file_path):
-    return jsonify({"error": "Download failed or login is required to access this video"}), 400
-
+    if not file_path or not os.path.exists(file_path):
+        return jsonify({"error": "Download failed"}), 500
 
     # Send the file back to browser as download
     return send_file(
