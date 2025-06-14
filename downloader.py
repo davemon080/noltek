@@ -1,5 +1,3 @@
-# downloader.py
-
 import yt_dlp
 import os
 import sys
@@ -10,7 +8,6 @@ class VideoDownloaderBot:
         print("✅ Video Downloader Bot initialized.")
 
     def download_single_video(self, url: str, output_path: str = "downloads/", format_choice: str = 'mp4', resolution_choice: str = None):
-        """Downloads a single video with specified format and resolution."""
         if not url:
             print("❌ No URL provided.")
             return None, None
@@ -19,16 +16,14 @@ class VideoDownloaderBot:
             os.makedirs(output_path)
             print(f"📁 Created download directory: {output_path}")
 
-        # Base yt-dlp options
         ydl_opts = {
             'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
             'noplaylist': True,
             'retries': 5,
             'progress_hooks': [self.download_progress_hook],
-            'cookiefile': 'cookies.txt'  # Optional: Only if you need to pass cookies for age-restricted content
+            'cookiefile': 'cookies.txt'
         }
 
-        # Format-specific options
         if format_choice == 'mp3':
             ydl_opts.update({
                 'format': 'bestaudio/best',
@@ -70,7 +65,6 @@ class VideoDownloaderBot:
             return None, None
 
     def download_progress_hook(self, d):
-        """Simple progress log."""
         if d['status'] == 'downloading':
             if 'total_bytes' in d and 'downloaded_bytes' in d:
                 percent = (d['downloaded_bytes'] / d['total_bytes']) * 100
