@@ -32,7 +32,7 @@ class VideoDownloaderBot:
                     'preferredcodec': 'mp3',
                     'preferredquality': '192',
                 }],
-                'outtmpl': os.path.join(output_path, '%(title)s.mp3'),
+                'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
             })
             print("🎵 Downloading audio as MP3.")
         else:
@@ -55,11 +55,18 @@ class VideoDownloaderBot:
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info_dict = ydl.extract_info(url, download=True)
+
+                # Get the real saved file path from yt_dlp
+                file_path = ydl.prepare_filename(info_dict)
+                if format_choice == 'mp3':
+                    file_path = file_path.rsplit('.', 1)[0] + '.mp3'  # Adjust for post-processing
+
+                # Sanitize title only for safe return
                 title = secure_filename(info_dict.get('title', 'video'))
-                ext = 'mp3' if format_choice == 'mp3' else 'mp4'
-                file_path = os.path.abspath(os.path.join(output_path, f"{title}.{ext}"))
+
                 print(f"✅ Successfully downloaded: {file_path}")
-                return title, file_path
+                return title, os.path.abspath(file_path)
+
         except Exception as e:
             print(f"❌ Download failed: {str(e)}")
             return None, None
