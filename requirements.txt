@@ -4,6 +4,6 @@ Flask-Limiter==3.5.0
 gunicorn==21.2.0
 pytube==15.0.0
 yt-dlp==2023.10.13
-redis==4.6.0
-rq==1.15.1
+
+
 
