@@ -56,16 +56,26 @@ class VideoDownloaderBot:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info_dict = ydl.extract_info(url, download=True)
 
-                # Get the real saved file path from yt_dlp
+                if not info_dict:
+                    print("❌ Failed to retrieve video info.")
+                    return None, None
+
                 file_path = ydl.prepare_filename(info_dict)
+                if not file_path:
+                    print("❌ No file path returned from yt_dlp.")
+                    return None, None
+
                 if format_choice == 'mp3':
                     file_path = file_path.rsplit('.', 1)[0] + '.mp3'  # Adjust for post-processing
 
-                # Sanitize title only for safe return
-                title = secure_filename(info_dict.get('title', 'video'))
+                abs_path = os.path.abspath(file_path)
+                if not os.path.exists(abs_path):
+                    print(f"❌ File not found after download: {abs_path}")
+                    return None, None
 
-                print(f"✅ Successfully downloaded: {file_path}")
-                return title, os.path.abspath(file_path)
+                title = secure_filename(info_dict.get('title', 'video'))
+                print(f"✅ Successfully downloaded: {abs_path}")
+                return title, abs_path
 
         except Exception as e:
             print(f"❌ Download failed: {str(e)}")
