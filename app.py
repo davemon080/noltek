@@ -17,6 +17,12 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}})  # Enable CORS for cross-origin requests
 
+# Initialize rate limiter CORRECTLY
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["10 per minute"],
+    app=app  # Pass app as keyword argument
+)
 # Configuration
 app.config.update({
     'DOWNLOAD_FOLDER': 'temp_downloads',
