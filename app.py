@@ -10,6 +10,9 @@ from flask_limiter.util import get_remote_address
 from pytube import YouTube
 from yt_dlp import YoutubeDL
 from dotenv import load_dotenv
+import tempfile
+import logging
+from downloader import download_video  # Ensure this module exists
 
 # Load environment variables
 load_dotenv()
@@ -17,12 +20,17 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}})  # Enable CORS for cross-origin requests
 
-# Initialize rate limiter CORRECTLY
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Initialize the rate limiter with the key function and limits, then attach the app
 limiter = Limiter(
     key_func=get_remote_address,
-    default_limits=["10 per minute"],
-    app=app  # Pass app as keyword argument
+    default_limits=["10 per minute"]
 )
+limiter.init_app(app)
+
 # Configuration
 app.config.update({
     'DOWNLOAD_FOLDER': 'temp_downloads',
