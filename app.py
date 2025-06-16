@@ -1,128 +1,107 @@
-from flask import Flask, request, send_file, after_this_request, jsonify
+
+
+from flask import Flask, request, jsonify, send_file, after_this_request
 from flask_cors import CORS
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
-from pytube import YouTube
 from yt_dlp import YoutubeDL
 import os
 import uuid
-from downloader import VideoDownloaderBot
+
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}})
+CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}})  # Use your frontend domain in production
 
-# Configuration
-app.config.update({
-    'DOWNLOAD_FOLDER': 'temp_downloads',
-    'MAX_CONTENT_LENGTH': 100 * 1024 * 1024,  # 100MB limit
-})
+DOWNLOAD_FOLDER = "downloads"
+os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-# Create download directory
-os.makedirs(app.config['DOWNLOAD_FOLDER'], exist_ok=True)
+@app.route('/formats', methods=['POST'])
+def get_formats():
+    data = request.get_json()
+    url = data.get("url")
 
-# Rate limiter
-limiter = Limiter(
-    key_func=get_remote_address,
-    default_limits=["10 per minute"],
-    app=app
-)
+    if not url:
+        return jsonify({"error": "No URL provided"}), 400
 
-def detect_platform(url):
-    if 'youtube.com' in url or 'youtu.be' in url:
-        return 'youtube'
-    elif 'tiktok.com' in url:
-        return 'tiktok'
-    elif 'instagram.com' in url:
-        return 'instagram'
-    elif 'facebook.com' in url or 'fb.watch' in url:
-        return 'facebook'
-    return None
-
-def download_youtube(url, file_id):
     try:
-        yt = YouTube(url)
-        stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
-        if not stream:
-            return None
-        return stream.download(output_path=app.config['DOWNLOAD_FOLDER'], filename=f"{file_id}.mp4")
-    except Exception as e:
-        print(f"YouTube download error: {str(e)}")
-        return None
+        with YoutubeDL({'quiet': True, 'no_warnings': True}) as ydl:
+            info = ydl.extract_info(url, download=False)
+            formats = info.get('formats', [])
+            filtered = []
+            for f in formats:
+                height = f.get('height')
+                if f.get('vcodec') != 'none':
+                    resolution = f"{height}p" if height else 'unknown'
+                    ext = f.get('ext')
+                elif f.get('acodec') != 'none' and f.get('vcodec') == 'none':
+                    resolution = 'audio only'
+                    ext = 'mp3'
+                else:
+                    continue
 
-def download_generic(url, file_id):
-    try:
-        ydl_opts = {
-            'format': 'best',
-            'outtmpl': f"{app.config['DOWNLOAD_FOLDER']}/{file_id}.%(ext)s",
-            'quiet': True,
-            'no_warnings': True,
-        }
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            return f"{app.config['DOWNLOAD_FOLDER']}/{file_id}.{info['ext']}"
-    except Exception as e:
-        print(f"Generic download error: {str(e)}")
-        return None
+                if resolution in ['audio only', '480p', '720p', '1080p', '1440p', '2160p'] and ext in ['mp4', 'mp3']:
+                    filtered.append({
+                        'format_id': f['format_id'],
+                        'ext': ext,
+                        'resolution': resolution
+                    })
 
-def download_task(url, file_id, platform):
-    if platform == 'youtube':
-        return download_youtube(url, file_id)
-    else:
-        return download_generic(url, file_id)
+            return jsonify({"formats": filtered})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/download', methods=['POST'])
-@limiter.limit("5 per minute")
-def handle_download():
+def download_video():
     data = request.get_json()
-    video_url = data.get('url')
+    url = data.get("url")
+    format_id = data.get("format_id")
 
-    if not video_url:
-        return jsonify({'error': 'No URL provided'}), 400
-
-    platform = detect_platform(video_url)
-    if not platform:
-        return jsonify({'error': 'Unsupported platform'}), 400
+    if not url or not format_id:
+        return jsonify({"error": "Missing URL or format ID"}), 400
 
     file_id = str(uuid.uuid4())
-    file_path = download_task(video_url, file_id, platform)
+    output_template = os.path.join(DOWNLOAD_FOLDER, f"{file_id}.%(ext)s")
 
-    if not file_path or not os.path.exists(file_path):
-        return jsonify({'error': 'Failed to download video'}), 500
+    ydl_opts = {
+        'format': format_id,
+        'outtmpl': output_template,
+        'quiet': True,
+        'no_warnings': True,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+        }] if format_id == 'mp3' else []
+    }
 
-    return jsonify({
-        'file_id': file_id,
-        'filename': os.path.basename(file_path),
-        'platform': platform,
-        'status': 'completed'
-    })
+    try:
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            ext = 'mp3' if format_id == 'mp3' else info.get('ext')
+            return jsonify({
+                "file_id": file_id,
+                "ext": ext
+            })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/download/<file_id>', methods=['GET'])
-def download_file(file_id):
-    file_path = None
-    for file in os.listdir(app.config['DOWNLOAD_FOLDER']):
-        if file.startswith(file_id):
-            file_path = os.path.join(app.config['DOWNLOAD_FOLDER'], file)
-            break
+def serve_file(file_id):
+    for f in os.listdir(DOWNLOAD_FOLDER):
+        if f.startswith(file_id):
+            file_path = os.path.join(DOWNLOAD_FOLDER, f)
 
-    if not file_path or not os.path.exists(file_path):
-        return jsonify({'error': 'File not found'}), 404
+            @after_this_request
+            def delete_file(response):
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    app.logger.error(f"Cleanup error: {e}")
+                return response
 
-    @after_this_request
-    def cleanup(response):
-        try:
-            os.remove(file_path)
-        except Exception as e:
-            app.logger.error(f"Error deleting file: {str(e)}")
-        return response
+            return send_file(file_path, as_attachment=True)
 
-    return send_file(file_path, as_attachment=True)
+    return jsonify({"error": "File not found"}), 404
 
 @app.route('/health', methods=['GET'])
-def health_check():
-    return jsonify({
-        'status': 'ok',
-        'message': 'Downloader service is running',
-        'redis': 'not used'
-    })
+def health():
+    return jsonify({"status": "ok"})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
