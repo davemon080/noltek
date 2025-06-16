@@ -1,27 +1,22 @@
-Copy
-from flask import Flask, request, send_file, after_this_request
+from flask import Flask, request, send_file, after_this_request, jsonify
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from pytube import YouTube
+from yt_dlp import YoutubeDL
+import redis
+from rq import Queue
 import os
-from downloader import VideoDownloaderBot  # Corrected import
+import uuid
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}}) 
-
-# Initialize rate limiter
-limiter = Limiter(
-    key_func=get_remote_address,
-    default_limits=["10 per minute"],
-    app=app
-)
-
+# Restrict CORS to your frontend
+CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}})
 
 # Configuration
 app.config.update({
     'DOWNLOAD_FOLDER': 'temp_downloads',
     'MAX_CONTENT_LENGTH': 100 * 1024 * 1024,  # 100MB limit
-    'SECRET_KEY': os.getenv('SECRET_KEY', 'default-secret-key'),
     'REDIS_URL': os.getenv('REDIS_URL', 'redis://localhost:6379/0')
 })
 
@@ -30,9 +25,9 @@ os.makedirs(app.config['DOWNLOAD_FOLDER'], exist_ok=True)
 
 # Initialize rate limiter
 limiter = Limiter(
-    app,
     key_func=get_remote_address,
-    default_limits=["10 per minute"]
+    default_limits=["10 per minute"],
+    app=app
 )
 
 # Initialize Redis Queue
@@ -94,7 +89,7 @@ def download_task(url, file_id, platform):
 @limiter.limit("5 per minute")
 def handle_download():
     """Endpoint to handle download requests"""
-    data = request.json
+    data = request.get_json()
     video_url = data.get('url')
     
     if not video_url:
