@@ -8,6 +8,7 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}})
 
 DOWNLOAD_FOLDER = "downloads"
+COOKIE_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
 @app.route('/formats', methods=['POST'])
@@ -19,7 +20,12 @@ def get_formats():
         return jsonify({"error": "No URL provided"}), 400
 
     try:
-        with YoutubeDL({'quiet': True, 'no_warnings': True}) as ydl:
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'cookiefile': COOKIE_FILE
+        }
+        with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             formats = info.get('formats', [])
             filtered = []
@@ -31,7 +37,6 @@ def get_formats():
                 acodec = f.get('acodec')
                 vcodec = f.get('vcodec')
 
-                # Determine resolution
                 if vcodec == 'none' and acodec != 'none':
                     resolution = 'audio only'
                 elif vcodec != 'none':
@@ -39,7 +44,6 @@ def get_formats():
                 else:
                     continue
 
-                # Show formats in useful resolutions only
                 if resolution in ['audio only', '480p', '720p', '1080p', '1440p', '2160p']:
                     filtered.append({
                         'format_id': format_id,
@@ -67,14 +71,14 @@ def download_video():
         'format': format_id,
         'outtmpl': output_template,
         'quiet': True,
-        'no_warnings': True
-         'cookiefile': 'cookies.txt'
+        'no_warnings': True,
+        'cookiefile': COOKIE_FILE
     }
 
     try:
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            ext = info.get('ext') or 'mp4'  # fallback to mp4
+            ext = info.get('ext') or 'mp4'
             return jsonify({
                 "file_id": file_id,
                 "ext": ext
