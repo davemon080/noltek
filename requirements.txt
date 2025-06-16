@@ -1,12 +1,6 @@
-
-Flask==2.3.2
-Flask-Cors==3.0.10
+yt-dlp
+ffmpeg-python
+Flask==2.3.3
+Flask-Cors==4.0.0
 Flask-Limiter==3.5.0
-pytube==15.0.0
-yt-dlp==2023.7.6
-redis==4.6.0
-python-dotenv==1.0.0
-rq==1.15.1
-gunicorn==20.1.0
-requests==2.31.0
-setuptools==80.0.0  # Fixes pkg_resources warning
+gunicorn==21.2.0
