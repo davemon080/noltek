@@ -4,42 +4,29 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from pytube import YouTube
 from yt_dlp import YoutubeDL
-import redis
-from rq import Queue
 import os
 import uuid
 
 app = Flask(__name__)
-# Restrict CORS to your frontend
 CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}})
 
 # Configuration
 app.config.update({
     'DOWNLOAD_FOLDER': 'temp_downloads',
     'MAX_CONTENT_LENGTH': 100 * 1024 * 1024,  # 100MB limit
-    'REDIS_URL': os.getenv('REDIS_URL', 'redis://localhost:6379/0')
 })
 
 # Create download directory
 os.makedirs(app.config['DOWNLOAD_FOLDER'], exist_ok=True)
 
-# Initialize rate limiter
+# Rate limiter
 limiter = Limiter(
     key_func=get_remote_address,
     default_limits=["10 per minute"],
     app=app
 )
 
-# Initialize Redis Queue
-try:
-    r = redis.from_url(app.config['REDIS_URL'])
-    q = Queue(connection=r, default_timeout=3600)
-    redis_available = True
-except:
-    redis_available = False
-
 def detect_platform(url):
-    """Detect video platform from URL"""
     if 'youtube.com' in url or 'youtu.be' in url:
         return 'youtube'
     elif 'tiktok.com' in url:
@@ -51,7 +38,6 @@ def detect_platform(url):
     return None
 
 def download_youtube(url, file_id):
-    """Download YouTube video using pytube"""
     try:
         yt = YouTube(url)
         stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
@@ -63,7 +49,6 @@ def download_youtube(url, file_id):
         return None
 
 def download_generic(url, file_id):
-    """Download videos using yt-dlp (supports TikTok, Instagram, Facebook)"""
     try:
         ydl_opts = {
             'format': 'best',
@@ -79,7 +64,6 @@ def download_generic(url, file_id):
         return None
 
 def download_task(url, file_id, platform):
-    """Background download task"""
     if platform == 'youtube':
         return download_youtube(url, file_id)
     else:
@@ -88,54 +72,40 @@ def download_task(url, file_id, platform):
 @app.route('/download', methods=['POST'])
 @limiter.limit("5 per minute")
 def handle_download():
-    """Endpoint to handle download requests"""
     data = request.get_json()
     video_url = data.get('url')
-    
+
     if not video_url:
         return jsonify({'error': 'No URL provided'}), 400
-    
+
     platform = detect_platform(video_url)
     if not platform:
         return jsonify({'error': 'Unsupported platform'}), 400
-    
+
     file_id = str(uuid.uuid4())
-    
-    # Process immediately if Redis not available
-    if not redis_available:
-        file_path = download_task(video_url, file_id, platform)
-        if not file_path or not os.path.exists(file_path):
-            return jsonify({'error': 'Failed to download video'}), 500
-        
-        return jsonify({
-            'file_id': file_id,
-            'filename': os.path.basename(file_path),
-            'platform': platform,
-            'status': 'completed'
-        })
-    
-    # Queue background job if Redis available
-    job = q.enqueue(download_task, video_url, file_id, platform)
+    file_path = download_task(video_url, file_id, platform)
+
+    if not file_path or not os.path.exists(file_path):
+        return jsonify({'error': 'Failed to download video'}), 500
+
     return jsonify({
-        'job_id': job.get_id(),
         'file_id': file_id,
-        'status': 'queued',
-        'platform': platform
+        'filename': os.path.basename(file_path),
+        'platform': platform,
+        'status': 'completed'
     })
 
 @app.route('/download/<file_id>', methods=['GET'])
 def download_file(file_id):
-    """Endpoint to download processed files"""
     file_path = None
     for file in os.listdir(app.config['DOWNLOAD_FOLDER']):
         if file.startswith(file_id):
             file_path = os.path.join(app.config['DOWNLOAD_FOLDER'], file)
             break
-    
+
     if not file_path or not os.path.exists(file_path):
         return jsonify({'error': 'File not found'}), 404
-    
-    # Schedule file cleanup after download
+
     @after_this_request
     def cleanup(response):
         try:
@@ -143,32 +113,15 @@ def download_file(file_id):
         except Exception as e:
             app.logger.error(f"Error deleting file: {str(e)}")
         return response
-    
-    return send_file(file_path, as_attachment=True)
 
-@app.route('/status/<job_id>', methods=['GET'])
-def job_status(job_id):
-    """Check job status"""
-    if not redis_available:
-        return jsonify({'error': 'Redis not available'}), 503
-    
-    job = q.fetch_job(job_id)
-    if not job:
-        return jsonify({'error': 'Job not found'}), 404
-    
-    return jsonify({
-        'job_id': job_id,
-        'status': job.get_status(),
-        'result': job.result
-    })
+    return send_file(file_path, as_attachment=True)
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
     return jsonify({
         'status': 'ok',
         'message': 'Downloader service is running',
-        'redis': 'available' if redis_available else 'unavailable'
+        'redis': 'not used'
     })
 
 if __name__ == '__main__':
