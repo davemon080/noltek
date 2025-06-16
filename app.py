@@ -1,155 +1,180 @@
-from flask import Flask, request, send_file, jsonify, send_from_directory, after_this_request
+import os
+import uuid
+import requests
+import redis
+from rq import Queue
+from flask import Flask, request, jsonify, send_file, after_this_request
 from flask_cors import CORS
-from downloader import VideoDownloaderBot
-from werkzeug.utils import secure_filename
-import yt_dlp  # Required for /file-info
-import os, threading, uuid, time
-from threading import Lock
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from pytube import YouTube
+from yt_dlp import YoutubeDL
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}})
+CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}})  # Enable CORS for cross-origin requests
 
-bot = VideoDownloaderBot()
-DOWNLOAD_FOLDER = 'downloads'
-os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+# Configuration
+app.config.update({
+    'DOWNLOAD_FOLDER': 'temp_downloads',
+    'MAX_CONTENT_LENGTH': 100 * 1024 * 1024,  # 100MB limit
+    'SECRET_KEY': os.getenv('SECRET_KEY', 'default-secret-key'),
+    'REDIS_URL': os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+})
 
-download_status = {}
-status_lock = Lock()
+# Create download directory
+os.makedirs(app.config['DOWNLOAD_FOLDER'], exist_ok=True)
 
-# ========== Auto-Cleanup for old downloads ==========
-def clean_expired_entries(max_age=3600):
-    now = time.time()
-    with status_lock:
-        expired_ids = [
-            d_id for d_id, entry in download_status.items()
-            if now - entry['created'] > max_age
-        ]
-        for d_id in expired_ids:
-            file_name = download_status[d_id].get('file')
-            if file_name:
-                try:
-                    os.remove(os.path.join(DOWNLOAD_FOLDER, file_name))
-                except:
-                    pass
-            del download_status[d_id]
+# Initialize rate limiter
+limiter = Limiter(
+    app,
+    key_func=get_remote_address,
+    default_limits=["10 per minute"]
+)
 
-# ========== /file-info Endpoint ==========
-@app.route('/file-info', methods=['GET'])
-def get_file_info():
+# Initialize Redis Queue
+try:
+    r = redis.from_url(app.config['REDIS_URL'])
+    q = Queue(connection=r, default_timeout=3600)
+    redis_available = True
+except:
+    redis_available = False
+
+def detect_platform(url):
+    """Detect video platform from URL"""
+    if 'youtube.com' in url or 'youtu.be' in url:
+        return 'youtube'
+    elif 'tiktok.com' in url:
+        return 'tiktok'
+    elif 'instagram.com' in url:
+        return 'instagram'
+    elif 'facebook.com' in url or 'fb.watch' in url:
+        return 'facebook'
+    return None
+
+def download_youtube(url, file_id):
+    """Download YouTube video using pytube"""
     try:
-        url = request.args.get('url')
-        if not url:
-            return jsonify({'error': 'Missing URL'}), 400
-
-        with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
-            info = ydl.extract_info(url, download=False)
-            size_bytes = info.get('filesize_approx') or info.get('filesize')
-            size_mb = round(size_bytes / (1024 * 1024), 2) if size_bytes else None
-            duration_sec = info.get('duration')
-            duration_fmt = f"{int(duration_sec // 60)}:{int(duration_sec % 60):02d}" if duration_sec else None
-
-            return jsonify({
-                'sizeMB': size_mb,
-                'duration': duration_fmt,
-                'title': info.get('title'),
-                'thumbnail': info.get('thumbnail')
-            })
-
+        yt = YouTube(url)
+        stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
+        if not stream:
+            return None
+        return stream.download(output_path=app.config['DOWNLOAD_FOLDER'], filename=f"{file_id}.mp4")
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"YouTube download error: {str(e)}")
+        return None
 
-# ========== Start Download ==========
-@app.route('/start-download', methods=['POST'])
-def start_download():
+def download_generic(url, file_id):
+    """Download videos using yt-dlp (supports TikTok, Instagram, Facebook)"""
     try:
-        data = request.get_json()
-        url = data.get('url')
-        format_choice = data.get('format', 'mp4')
-        resolution = data.get('resolution', 'best')
-
-        download_id = str(uuid.uuid4())
-
-        with status_lock:
-            download_status[download_id] = {
-                'status': 'processing',
-                'file': None,
-                'created': time.time()
-            }
-
-        def background_download():
-            try:
-                title, file_path = bot.download_single_video(
-                    url, format_choice=format_choice, resolution_choice=resolution
-                )
-
-                if not file_path:
-                    raise Exception("Download failed or returned None")
-
-                safe_name = secure_filename(os.path.basename(file_path))
-                safe_path = os.path.join(DOWNLOAD_FOLDER, safe_name)
-
-                if not os.path.abspath(safe_path).startswith(os.path.abspath(DOWNLOAD_FOLDER)):
-                    raise SecurityError("Invalid path attempt")
-
-                if safe_path != file_path:
-                    os.rename(file_path, safe_path)
-                    file_path = safe_path
-
-                with status_lock:
-                    download_status[download_id] = {
-                        'status': 'done',
-                        'file': safe_name,
-                        'created': time.time()
-                    }
-
-            except Exception as e:
-                print(f"Download error: {e}")
-                with status_lock:
-                    download_status[download_id] = {
-                        'status': 'error',
-                        'error': str(e),
-                        'created': time.time()
-                    }
-
-        threading.Thread(target=background_download).start()
-        return jsonify({'download_id': download_id})
-
+        ydl_opts = {
+            'format': 'best',
+            'outtmpl': f"{app.config['DOWNLOAD_FOLDER']}/{file_id}.%(ext)s",
+            'quiet': True,
+            'no_warnings': True,
+        }
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            return f"{app.config['DOWNLOAD_FOLDER']}/{file_id}.{info['ext']}"
     except Exception as e:
-        print(f"Start download error: {e}")
-        return jsonify({'error': str(e)}), 500
+        print(f"Generic download error: {str(e)}")
+        return None
 
-# ========== Check Download Status ==========
-@app.route('/status/<download_id>', methods=['GET'])
-def check_status(download_id):
-    clean_expired_entries()
-    with status_lock:
-        status = download_status.get(download_id)
-    if not status:
-        return jsonify({'error': 'Invalid download ID'}), 404
-    return jsonify(status)
+def download_task(url, file_id, platform):
+    """Background download task"""
+    if platform == 'youtube':
+        return download_youtube(url, file_id)
+    else:
+        return download_generic(url, file_id)
 
-# ========== Serve File & Delete After Sending ==========
-@app.route('/download/<download_id>', methods=['GET'])
-def serve_file(download_id):
-    clean_expired_entries()
-    with status_lock:
-        status = download_status.get(download_id)
-    if not status or status['status'] != 'done':
-        return jsonify({'error': 'File not ready'}), 404
+@app.route('/download', methods=['POST'])
+@limiter.limit("5 per minute")
+def handle_download():
+    """Endpoint to handle download requests"""
+    data = request.json
+    video_url = data.get('url')
+    
+    if not video_url:
+        return jsonify({'error': 'No URL provided'}), 400
+    
+    platform = detect_platform(video_url)
+    if not platform:
+        return jsonify({'error': 'Unsupported platform'}), 400
+    
+    file_id = str(uuid.uuid4())
+    
+    # Process immediately if Redis not available
+    if not redis_available:
+        file_path = download_task(video_url, file_id, platform)
+        if not file_path or not os.path.exists(file_path):
+            return jsonify({'error': 'Failed to download video'}), 500
+        
+        return jsonify({
+            'file_id': file_id,
+            'filename': os.path.basename(file_path),
+            'platform': platform,
+            'status': 'completed'
+        })
+    
+    # Queue background job if Redis available
+    job = q.enqueue(download_task, video_url, file_id, platform)
+    return jsonify({
+        'job_id': job.get_id(),
+        'file_id': file_id,
+        'status': 'queued',
+        'platform': platform
+    })
 
-    file_path = os.path.join(DOWNLOAD_FOLDER, status['file'])
-
+@app.route('/download/<file_id>', methods=['GET'])
+def download_file(file_id):
+    """Endpoint to download processed files"""
+    file_path = None
+    for file in os.listdir(app.config['DOWNLOAD_FOLDER']):
+        if file.startswith(file_id):
+            file_path = os.path.join(app.config['DOWNLOAD_FOLDER'], file)
+            break
+    
+    if not file_path or not os.path.exists(file_path):
+        return jsonify({'error': 'File not found'}), 404
+    
+    # Schedule file cleanup after download
     @after_this_request
-    def remove_file(response):
+    def cleanup(response):
         try:
             os.remove(file_path)
-            print(f"🧹 Deleted: {file_path}")
         except Exception as e:
-            print(f"⚠️ Cleanup error: {e}")
+            app.logger.error(f"Error deleting file: {str(e)}")
         return response
+    
+    return send_file(file_path, as_attachment=True)
 
-    return send_from_directory(DOWNLOAD_FOLDER, status['file'], as_attachment=True)
+@app.route('/status/<job_id>', methods=['GET'])
+def job_status(job_id):
+    """Check job status"""
+    if not redis_available:
+        return jsonify({'error': 'Redis not available'}), 503
+    
+    job = q.fetch_job(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+    
+    return jsonify({
+        'job_id': job_id,
+        'status': job.get_status(),
+        'result': job.result
+    })
 
-# ========== Run Flask (local only) ==========
-if __name__ == "__main__":
-    app.run(debug=True, threaded=True)
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'ok',
+        'message': 'Downloader service is running',
+        'redis': 'available' if redis_available else 'unavailable'
+    })
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
