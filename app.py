@@ -1,21 +1,21 @@
-import os
-import uuid
-import requests
-import redis
-from rq import Queue
-from flask import Flask, request, jsonify, send_file, after_this_request
+Copy
+from flask import Flask, request, send_file, after_this_request
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from pytube import YouTube
-from yt_dlp import YoutubeDL
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
+import os
+from downloader import VideoDownloaderBot  # Corrected import
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}})  # Enable CORS for cross-origin requests
+CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}}) 
+
+# Initialize rate limiter
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["10 per minute"],
+    app=app
+)
+
 
 # Configuration
 app.config.update({
