@@ -81,8 +81,10 @@ def download_video():
     url = data.get("url")
     format_id = data.get("format_id") or infer_format_id(data.get("url"), data.get("format"), data.get("resolution"))
 
-    if not url or not format_id:
-        return jsonify({"error": "Missing URL or format ID"}), 400
+    if not url:
+        return jsonify({"error": "Missing URL"}), 400
+    if not format_id:
+        return jsonify({"error": "Could not determine format ID"}), 400
         return jsonify({"error": "Missing URL or format ID"}), 400
 
     file_id = str(uuid.uuid4())
