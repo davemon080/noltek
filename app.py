@@ -60,6 +60,7 @@ def get_formats():
 
             return jsonify({"formats": filtered})
     except Exception as e:
+        print(f"❌ /formats error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/download', methods=['POST'])
@@ -91,6 +92,7 @@ def download_video():
                 "ext": ext
             })
     except Exception as e:
+        print(f"❌ /download error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/metadata', methods=['POST'])
@@ -110,6 +112,7 @@ def get_metadata():
         }
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
+            print(f"✅ Metadata fetched for: {info.get('title')}")
             return jsonify({
                 "title": info.get("title"),
                 "thumbnail": info.get("thumbnail"),
@@ -117,6 +120,7 @@ def get_metadata():
                 "uploader": info.get("uploader", "")
             })
     except Exception as e:
+        print(f"❌ /metadata error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/download/<file_id>', methods=['GET'])
