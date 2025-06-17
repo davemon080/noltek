@@ -86,6 +86,31 @@ def download_video():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/metadata', methods=['POST'])
+def get_metadata():
+    data = request.get_json()
+    url = data.get("url")
+
+    if not url:
+        return jsonify({"error": "No URL provided"}), 400
+
+    try:
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'cookiefile': COOKIE_FILE
+        }
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            return jsonify({
+                "title": info.get("title"),
+                "thumbnail": info.get("thumbnail"),
+                "duration": info.get("duration_string", "unknown"),
+                "uploader": info.get("uploader", "")
+            })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/download/<file_id>', methods=['GET'])
 def serve_file(file_id):
     for f in os.listdir(DOWNLOAD_FOLDER):
