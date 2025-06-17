@@ -6,13 +6,7 @@ import uuid
 from datetime import timedelta
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:5000",
-    "http://127.0.0.1:5500",
-    "https://noltek.netlify.app"
-]}}, methods=["GET", "POST", "OPTIONS"], supports_credentials=True)
+CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}})
 
 DOWNLOAD_FOLDER = "downloads"
 COOKIE_FILE = "cookies.txt"
@@ -60,7 +54,7 @@ def get_formats():
 
             return jsonify({"formats": filtered})
     except Exception as e:
-        print(f"❌ /formats error: {e}")
+        
         return jsonify({"error": str(e)}), 500
 
 @app.route('/download', methods=['POST'])
@@ -92,7 +86,7 @@ def download_video():
                 "ext": ext
             })
     except Exception as e:
-        print(f"❌ /download error: {e}")
+        
         return jsonify({"error": str(e)}), 500
 
 @app.route('/metadata', methods=['POST'])
@@ -104,7 +98,7 @@ def get_metadata():
         return jsonify({"error": "No URL provided"}), 400
 
     try:
-        print("🔍 Incoming /metadata request")
+        
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
@@ -112,7 +106,7 @@ def get_metadata():
         }
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            print(f"✅ Metadata fetched for: {info.get('title')}")
+            
             return jsonify({
                 "title": info.get("title"),
                 "thumbnail": info.get("thumbnail"),
@@ -120,7 +114,7 @@ def get_metadata():
                 "uploader": info.get("uploader", "")
             })
     except Exception as e:
-        print(f"❌ /metadata error: {e}")
+        
         return jsonify({"error": str(e)}), 500
 
 @app.route('/download/<file_id>', methods=['GET'])
@@ -147,4 +141,4 @@ def health():
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port)
