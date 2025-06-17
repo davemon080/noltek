@@ -3,12 +3,15 @@ from flask_cors import CORS
 from yt_dlp import YoutubeDL
 import os
 import uuid
-from datetime import timedelta
 
 app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}})
 
-# Infer format_id from resolution + format (fallback if not provided)
-def infer_format_id(url, target_format, target_resolution):
+DOWNLOAD_FOLDER = "downloads"
+COOKIE_FILE = "cookies.txt"
+os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+
+def find_format_id(url, format_ext, resolution):
     try:
         with YoutubeDL({
             'quiet': True,
@@ -17,75 +20,33 @@ def infer_format_id(url, target_format, target_resolution):
         }) as ydl:
             info = ydl.extract_info(url, download=False)
             for f in info.get('formats', []):
-                height = f.get('height')
-                res = 'audio only' if f.get('vcodec') == 'none' and f.get('acodec') != 'none' else (f"{height}p" if height else '')
-                if res == target_resolution and f.get('ext') == target_format:
-                    return f.get('format_id')
-    except:
+                if f.get('ext') == format_ext:
+                    height = f.get('height', 0)
+                    vcodec = f.get('vcodec')
+                    acodec = f.get('acodec')
+                    current_res = 'audio only' if vcodec == 'none' and acodec != 'none' else (f"{height}p" if height else '')
+                    if current_res == resolution:
+                        return f.get('format_id')
+    except Exception:
         return None
     return None
-CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}})
-
-DOWNLOAD_FOLDER = "downloads"
-COOKIE_FILE = "cookies.txt"
-os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
-
-@app.route('/formats', methods=['POST'])
-def get_formats():
-    data = request.get_json()
-    url = data.get("url")
-
-    if not url:
-        return jsonify({"error": "No URL provided"}), 400
-
-    try:
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'cookiefile': COOKIE_FILE
-        }
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            formats = info.get('formats', [])
-            filtered = []
-
-            for f in formats:
-                format_id = f.get('format_id')
-                ext = f.get('ext')
-                height = f.get('height', 0)
-                acodec = f.get('acodec')
-                vcodec = f.get('vcodec')
-
-                if vcodec == 'none' and acodec != 'none':
-                    resolution = 'audio only'
-                elif vcodec != 'none':
-                    resolution = f"{height}p" if height else 'unknown'
-                else:
-                    continue
-
-                if resolution in ['audio only', '480p', '720p', '1080p', '1440p', '2160p']:
-                    filtered.append({
-                        'format_id': format_id,
-                        'ext': ext,
-                        'resolution': resolution
-                    })
-
-            return jsonify({"formats": filtered})
-    except Exception as e:
-        
-        return jsonify({"error": str(e)}), 500
 
 @app.route('/download', methods=['POST'])
 def download_video():
     data = request.get_json()
     url = data.get("url")
-    format_id = data.get("format_id") or infer_format_id(data.get("url"), data.get("format"), data.get("resolution"))
+    format_id = data.get("format_id")
+    format_ext = data.get("format")
+    resolution = data.get("resolution")
 
     if not url:
-        return jsonify({"error": "Missing URL"}), 400
+        return jsonify({"error": "Missing video URL"}), 400
+
+    if not format_id and format_ext and resolution:
+        format_id = find_format_id(url, format_ext, resolution)
+
     if not format_id:
         return jsonify({"error": "Could not determine format ID"}), 400
-        return jsonify({"error": "Missing URL or format ID"}), 400
 
     file_id = str(uuid.uuid4())
     output_template = os.path.join(DOWNLOAD_FOLDER, f"{file_id}.%(ext)s")
@@ -107,7 +68,6 @@ def download_video():
                 "ext": ext
             })
     except Exception as e:
-        
         return jsonify({"error": str(e)}), 500
 
 @app.route('/metadata', methods=['POST'])
@@ -119,7 +79,6 @@ def get_metadata():
         return jsonify({"error": "No URL provided"}), 400
 
     try:
-        
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
@@ -127,7 +86,6 @@ def get_metadata():
         }
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            
             return jsonify({
                 "title": info.get("title"),
                 "thumbnail": info.get("thumbnail"),
@@ -135,7 +93,6 @@ def get_metadata():
                 "uploader": info.get("uploader", "")
             })
     except Exception as e:
-        
         return jsonify({"error": str(e)}), 500
 
 @app.route('/download/<file_id>', methods=['GET'])
