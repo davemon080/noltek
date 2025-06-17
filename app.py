@@ -3,12 +3,13 @@ from flask_cors import CORS
 from yt_dlp import YoutubeDL
 import os
 import uuid
-
+from datetime import timedelta
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5000",
+     "http://127.0.0.1:5500",
     "https://noltek.netlify.app"
 ]}})
 
