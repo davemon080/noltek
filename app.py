@@ -4,14 +4,15 @@ from yt_dlp import YoutubeDL
 import os
 import uuid
 from datetime import timedelta
+
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5000",
-     "http://127.0.0.1:5500",
+    "http://127.0.0.1:5500",
     "https://noltek.netlify.app"
-]}})
+]}}, methods=["GET", "POST", "OPTIONS"], supports_credentials=True)
 
 DOWNLOAD_FOLDER = "downloads"
 COOKIE_FILE = "cookies.txt"
@@ -101,6 +102,7 @@ def get_metadata():
         return jsonify({"error": "No URL provided"}), 400
 
     try:
+        print("🔍 Incoming /metadata request")
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
@@ -141,4 +143,4 @@ def health():
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, debug=True)
