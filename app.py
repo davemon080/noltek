@@ -11,68 +11,49 @@ DOWNLOAD_FOLDER = "downloads"
 COOKIE_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-def find_format_id(url, format_ext, resolution):
-    try:
-        with YoutubeDL({
-            'quiet': True,
-            'no_warnings': True,
-            'cookiefile': COOKIE_FILE
-        }) as ydl:
-            info = ydl.extract_info(url, download=False)
-            fallback = None
-            for f in info.get('formats', []):
-                height = f.get('height', 0)
-                ext = f.get('ext')
-                vcodec = f.get('vcodec')
-                acodec = f.get('acodec')
-
-                current_res = 'audio only' if vcodec == 'none' and acodec != 'none' else f"{height}p" if height else ''
-                if ext == format_ext:
-                    if current_res == resolution:
-                        return f.get('format_id'), ext
-                    if not fallback and current_res:  # save best effort
-                        fallback = (f.get('format_id'), ext)
-            return fallback if fallback else (None, None)
-    except Exception:
-        return None, None
-
 @app.route('/download', methods=['POST'])
 def download_video():
     data = request.get_json()
     url = data.get("url")
-    format_id = data.get("format_id")
-    format_ext = data.get("format")
-    resolution = data.get("resolution")
+    file_format = data.get("format")  # mp4 or mp3
+    resolution = data.get("resolution")  # 480p, 720p, etc.
 
-    if not url or not format_ext or not resolution:
+    if not url or not file_format or not resolution:
         return jsonify({"error": "Missing required parameters"}), 400
-
-    if not format_id:
-        format_id, resolved_ext = find_format_id(url, format_ext, resolution)
-        if not format_id:
-            return jsonify({"error": "Could not determine format ID"}), 400
-    else:
-        resolved_ext = format_ext
 
     file_id = str(uuid.uuid4())
     output_template = os.path.join(DOWNLOAD_FOLDER, f"{file_id}.%(ext)s")
 
-    ydl_opts = {
-        'format': format_id,
-        'outtmpl': output_template,
-        'quiet': True,
-        'no_warnings': True,
-        'cookiefile': COOKIE_FILE,
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-        }] if resolved_ext == 'mp3' else []
-    }
+    if file_format == "mp3":
+        ydl_opts = {
+            'format': 'bestaudio',
+            'outtmpl': output_template,
+            'quiet': True,
+            'no_warnings': True,
+            'cookiefile': COOKIE_FILE,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+            }]
+        }
+    else:  # mp4 with forced audio
+        ydl_opts = {
+            'format': f"bestvideo[height={resolution[:-1]}]+bestaudio/best[height={resolution[:-1]}]",
+            'outtmpl': output_template,
+            'quiet': True,
+            'no_warnings': True,
+            'cookiefile': COOKIE_FILE,
+            'merge_output_format': 'mp4',
+            'postprocessors': [{
+                'key': 'FFmpegVideoConvertor',
+                'preferedformat': 'mp4'
+            }]
+        }
 
     try:
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            ext = 'mp3' if resolved_ext == 'mp3' else info.get('ext', 'mp4')
+            ext = 'mp3' if file_format == 'mp3' else 'mp4'
             return jsonify({
                 "file_id": file_id,
                 "ext": ext
@@ -120,7 +101,6 @@ def serve_file(file_id):
                 return response
 
             return send_file(file_path, as_attachment=True)
-
     return jsonify({"error": "File not found"}), 404
 
 @app.route('/health', methods=['GET'])
