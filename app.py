@@ -5,7 +5,12 @@ import os
 import uuid
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}})
+CORS(app, resources={r"/*": {"origins": [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5000",
+    "https://noltek.netlify.app"
+]}})
 
 DOWNLOAD_FOLDER = "downloads"
 COOKIE_FILE = "cookies.txt"
