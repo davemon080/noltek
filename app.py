@@ -19,24 +19,29 @@ def find_format_id(url, format_ext, resolution):
             'cookiefile': COOKIE_FILE
         }) as ydl:
             info = ydl.extract_info(url, download=False)
+            fallback = None
             for f in info.get('formats', []):
                 height = f.get('height', 0)
+                ext = f.get('ext')
                 vcodec = f.get('vcodec')
                 acodec = f.get('acodec')
-                ext = f.get('ext')
+
                 current_res = 'audio only' if vcodec == 'none' and acodec != 'none' else f"{height}p" if height else ''
-                if ext == format_ext and current_res == resolution:
-                    return f.get('format_id'), ext
+                if ext == format_ext:
+                    if current_res == resolution:
+                        return f.get('format_id'), ext
+                    if not fallback and current_res:  # save best effort
+                        fallback = (f.get('format_id'), ext)
+            return fallback if fallback else (None, None)
     except Exception:
         return None, None
-    return None, None
 
 @app.route('/download', methods=['POST'])
 def download_video():
     data = request.get_json()
     url = data.get("url")
-    format_id = data.get("format_id")  # optional
-    format_ext = data.get("format")    # required if format_id is missing
+    format_id = data.get("format_id")
+    format_ext = data.get("format")
     resolution = data.get("resolution")
 
     if not url or not format_ext or not resolution:
@@ -61,13 +66,13 @@ def download_video():
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
-        }] if format_ext == 'mp3' and resolution == 'audio only' else []
+        }] if resolved_ext == 'mp3' else []
     }
 
     try:
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            ext = 'mp3' if format_ext == 'mp3' and resolution == 'audio only' else info.get('ext', 'mp4')
+            ext = 'mp3' if resolved_ext == 'mp3' else info.get('ext', 'mp4')
             return jsonify({
                 "file_id": file_id,
                 "ext": ext
