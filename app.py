@@ -6,6 +6,24 @@ import uuid
 from datetime import timedelta
 
 app = Flask(__name__)
+
+# Infer format_id from resolution + format (fallback if not provided)
+def infer_format_id(url, target_format, target_resolution):
+    try:
+        with YoutubeDL({
+            'quiet': True,
+            'no_warnings': True,
+            'cookiefile': COOKIE_FILE
+        }) as ydl:
+            info = ydl.extract_info(url, download=False)
+            for f in info.get('formats', []):
+                height = f.get('height')
+                res = 'audio only' if f.get('vcodec') == 'none' and f.get('acodec') != 'none' else (f"{height}p" if height else '')
+                if res == target_resolution and f.get('ext') == target_format:
+                    return f.get('format_id')
+    except:
+        return None
+    return None
 CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}})
 
 DOWNLOAD_FOLDER = "downloads"
@@ -61,9 +79,10 @@ def get_formats():
 def download_video():
     data = request.get_json()
     url = data.get("url")
-    format_id = data.get("format_id")
+    format_id = data.get("format_id") or infer_format_id(data.get("url"), data.get("format"), data.get("resolution"))
 
     if not url or not format_id:
+        return jsonify({"error": "Missing URL or format ID"}), 400
         return jsonify({"error": "Missing URL or format ID"}), 400
 
     file_id = str(uuid.uuid4())
