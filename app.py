@@ -24,9 +24,12 @@ def download_video():
     file_id = str(uuid.uuid4())
     output_template = os.path.join(DOWNLOAD_FOLDER, f"{file_id}.%(ext)s")
 
+    # yt-dlp expects numeric resolution
+    res_value = resolution.replace("p", "")
+
     if file_format == "mp3":
         ydl_opts = {
-            'format': 'bestaudio',
+            'format': 'bestaudio/best',
             'outtmpl': output_template,
             'quiet': True,
             'no_warnings': True,
@@ -34,26 +37,24 @@ def download_video():
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
+                'preferredquality': '192',
             }]
         }
-    else:  # mp4 with forced audio
+        ext = 'mp3'
+    else:  # mp4
         ydl_opts = {
-            'format': f"bestvideo[height={resolution[:-1]}]+bestaudio/best[height={resolution[:-1]}]",
+            'format': f'bestvideo[height={res_value}][ext=mp4]+bestaudio[ext=m4a]/best[height={res_value}][ext=mp4]/best',
             'outtmpl': output_template,
             'quiet': True,
             'no_warnings': True,
             'cookiefile': COOKIE_FILE,
-            'merge_output_format': 'mp4',
-            'postprocessors': [{
-                'key': 'FFmpegVideoConvertor',
-                'preferedformat': 'mp4'
-            }]
+            'merge_output_format': 'mp4'
         }
+        ext = 'mp4'
 
     try:
         with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            ext = 'mp3' if file_format == 'mp3' else 'mp4'
+            ydl.download([url])
             return jsonify({
                 "file_id": file_id,
                 "ext": ext
