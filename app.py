@@ -36,25 +36,21 @@ def get_formats():
                 format_id = f.get('format_id')
                 ext = f.get('ext')
                 height = f.get('height')
-                has_audio = f.get('acodec') != 'none'
-                has_video = f.get('vcodec') != 'none'
 
-                # Filter for mp4 formats with both audio and video or just video (we'll merge later)
-                if ext == 'mp4' and height and has_video:
+                if ext == 'mp4' and height:
                     resolution = f"{height}p"
                     if resolution not in filtered:
                         filtered[resolution] = {
                             'format_id': format_id,
                             'ext': ext,
-                            'resolution': resolution,
-                            'has_audio': has_audio
+                            'resolution': resolution
                         }
 
             if not filtered:
                 return jsonify({"error": "No valid MP4 formats found."}), 400
 
             return jsonify({
-                "formats": sorted(filtered.values(), key=lambda x: int(x['resolution'].replace('p', '')))
+                "formats": sorted(filtered.values(), key=lambda x: int(x['resolution'].replace('p', '')), reverse=True)
             })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -73,7 +69,7 @@ def download_video():
     output_template = os.path.join(DOWNLOAD_FOLDER, f"{file_id}.%(ext)s")
 
     ydl_opts = {
-        'format': f"{format_id}+bestaudio/best",
+        'format': f'{format_id}+bestaudio/best',
         'outtmpl': output_template,
         'quiet': True,
         'no_warnings': True,
@@ -81,20 +77,22 @@ def download_video():
         'merge_output_format': 'mp4',
         'postprocessors': [{
             'key': 'FFmpegVideoConvertor',
-            'preferredformat': 'mp4'
+            'preferedformat': 'mp4'  # Misspelled on purpose for yt_dlp
         }]
     }
 
     try:
         with YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+            info = ydl.extract_info(url)
+            filename = ydl.prepare_filename(info)
 
-        final_path = os.path.join(DOWNLOAD_FOLDER, f"{file_id}.mp4")
-        if not os.path.exists(final_path):
-            return jsonify({"error": "Download failed or file not found."}), 500
+        # Find the final .mp4 file after postprocessing
+        final_file = os.path.splitext(filename)[0] + ".mp4"
+        if not os.path.exists(final_file):
+            return jsonify({"error": "Download failed. File not found."}), 500
 
         return jsonify({
-            "file_id": file_id,
+            "file_id": os.path.splitext(os.path.basename(final_file))[0],
             "ext": 'mp4'
         })
     except Exception as e:
