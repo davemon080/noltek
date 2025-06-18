@@ -1,94 +1,113 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, after_this_request
 from flask_cors import CORS
-from pytube import YouTube
-from io import BytesIO
+from yt_dlp import YoutubeDL
 import os
-import re
+import uuid
 
 app = Flask(__name__)
-
-# Configure CORS to allow your frontend domain
 CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}})
 
-def format_duration(seconds):
-    """Format duration in seconds to HH:MM:SS"""
-    minutes, seconds = divmod(seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    if hours > 0:
-        return f"{int(hours)}:{int(minutes):02d}:{int(seconds):02d}"
-    return f"{int(minutes)}:{int(seconds):02d}"
+DOWNLOAD_FOLDER = "downloads"
+COOKIE_FILE = "cookies.txt"
+os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-def sanitize_filename(filename):
-    """Remove invalid characters from filename"""
-    return re.sub(r'[\\/*?:"<>|]', '', filename)
+@app.route('/formats', methods=['POST'])
+def get_formats():
+    data = request.get_json()
+    url = data.get("url")
 
-@app.route('/metadata', methods=['POST'])
-def metadata():
-    """Endpoint to fetch video metadata"""
+    if not url:
+        return jsonify({"error": "No URL provided"}), 400
+
     try:
-        data = request.json
-        url = data.get('url')
-        if not url:
-            return jsonify({'error': 'URL is required'}), 400
-        
-        yt = YouTube(url)
-        return jsonify({
-            'title': yt.title,
-            'channel': yt.author,
-            'duration': format_duration(yt.length),
-            'thumbnail': yt.thumbnail_url
-        })
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'cookiefile': COOKIE_FILE
+        }
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            formats = info.get('formats', [])
+            filtered = []
+
+            for f in formats:
+                format_id = f.get('format_id')
+                ext = f.get('ext')
+                height = f.get('height', 0)
+                acodec = f.get('acodec')
+                vcodec = f.get('vcodec')
+
+                if vcodec == 'none' and acodec != 'none':
+                    resolution = 'audio only'
+                elif vcodec != 'none':
+                    resolution = f"{height}p" if height else 'unknown'
+                else:
+                    continue
+
+                if resolution in ['audio only', '480p', '720p', '1080p', '1440p', '2160p']:
+                    filtered.append({
+                        'format_id': format_id,
+                        'ext': ext,
+                        'resolution': resolution
+                    })
+
+            return jsonify({"formats": filtered})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/download', methods=['POST'])
-def download():
-    """Endpoint to download video/audio"""
+def download_video():
+    data = request.get_json()
+    url = data.get("url")
+    format_id = data.get("format_id")
+
+    if not url or not format_id:
+        return jsonify({"error": "Missing URL or format ID"}), 400
+
+    file_id = str(uuid.uuid4())
+    output_template = os.path.join(DOWNLOAD_FOLDER, f"{file_id}.%(ext)s")
+
+    ydl_opts = {
+        'format': format_id,
+        'outtmpl': output_template,
+        'quiet': True,
+        'no_warnings': True,
+        'cookiefile': COOKIE_FILE
+    }
+
     try:
-        data = request.json
-        url = data.get('url')
-        format = data.get('format', 'video')
-        quality = data.get('quality', 'highest')
-        
-        if not url:
-            return jsonify({'error': 'URL is required'}), 400
-        
-        yt = YouTube(url)
-        buffer = BytesIO()
-        
-        if format == 'video':
-            # Handle video download
-            streams = yt.streams.filter(progressive=True, file_extension='mp4')
-            
-            if quality == 'highest':
-                stream = streams.get_highest_resolution()
-            elif quality == '720p':
-                stream = streams.filter(res='720p').first()
-            elif quality == '360p':
-                stream = streams.filter(res='360p').first()
-            else:  # Fallback to highest quality
-                stream = streams.get_highest_resolution()
-                
-            stream.stream_to_buffer(buffer)
-            filename = sanitize_filename(f"{yt.title}.mp4")
-            mimetype = 'video/mp4'
-            
-        else:  # Audio format
-            stream = yt.streams.filter(only_audio=True).first()
-            stream.stream_to_buffer(buffer)
-            filename = sanitize_filename(f"{yt.title}.mp3")
-            mimetype = 'audio/mpeg'
-        
-        buffer.seek(0)
-        return send_file(
-            buffer,
-            as_attachment=True,
-            download_name=filename,
-            mimetype=mimetype
-        )
-        
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            ext = info.get('ext') or 'mp4'
+            return jsonify({
+                "file_id": file_id,
+                "ext": ext
+            })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/download/<file_id>', methods=['GET'])
+def serve_file(file_id):
+    for f in os.listdir(DOWNLOAD_FOLDER):
+        if f.startswith(file_id):
+            file_path = os.path.join(DOWNLOAD_FOLDER, f)
+
+            @after_this_request
+            def delete_file(response):
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    app.logger.error(f"Cleanup error: {e}")
+                return response
+
+            return send_file(file_path, as_attachment=True)
+
+    return jsonify({"error": "File not found"}), 404
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({"status": "ok"})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
