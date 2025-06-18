@@ -37,7 +37,6 @@ def get_formats():
                 ext = f.get('ext')
                 height = f.get('height')
 
-                # Include formats with height and mp4 extension (even if audio/video is separate)
                 if ext == 'mp4' and height:
                     resolution = f"{height}p"
                     if resolution not in filtered:
@@ -70,12 +69,16 @@ def download_video():
     output_template = os.path.join(DOWNLOAD_FOLDER, f"{file_id}.mp4")
 
     ydl_opts = {
-        'format': format_id,
+        'format': f"{format_id}+bestaudio/best",
         'outtmpl': output_template,
         'quiet': True,
         'no_warnings': True,
         'cookiefile': COOKIE_FILE,
-        'merge_output_format': 'mp4'
+        'merge_output_format': 'mp4',
+        'postprocessors': [{
+            'key': 'FFmpegVideoConvertor',
+            'preferedformat': 'mp4'
+        }]
     }
 
     try:
