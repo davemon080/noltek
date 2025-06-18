@@ -1,76 +1,88 @@
-# app.py
-from flask import Flask, request, send_file, jsonify
-from flask_cors import CORS  # Added for Netlify frontend support
+from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
 from pytube import YouTube
 from io import BytesIO
-import os
 import re
-import logging
+import os
 
 app = Flask(__name__)
 
-# Configure CORS for Netlify frontend
-CORS(app, resources={
-    r"/download": {
-        "origins": os.environ.get('ALLOWED_ORIGINS', 'https://noltek.netlify.app/')
-    }
-})
+# Configure CORS: Allow specific origin (Netlify frontend) or use '*' for development
+frontend_url = os.environ.get('FRONTEND_URL', '*')
+CORS(app, origins=frontend_url)
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+def sanitize_filename(name):
+    """Remove invalid characters from filename"""
+    return re.sub(r'[\\/*?:"<>|]', "", name)
 
-@app.route('/download', methods=['POST', 'OPTIONS'])  # Added OPTIONS for preflight
-def download_video():
-    if request.method == 'OPTIONS':
-        # Handle CORS preflight request
-        response = jsonify({'status': 'preflight'})
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
-        response.headers.add('Access-Control-Allow-Methods', 'POST')
-        return response
+@app.route('/backend/metadata', methods=['POST'])
+def get_metadata():
+    data = request.json
+    url = data.get('url')
+    
+    if not url:
+        return jsonify({'error': 'Missing URL parameter'}), 400
         
     try:
-        data = request.get_json()
-        url = data.get('url')
-        quality = data.get('quality', 'highest')
-        
-        if not url:
-            return jsonify({"error": "Missing URL parameter"}), 400
-        
-        # Sanitize filename
         yt = YouTube(url)
-        title = re.sub(r'[^\w\s-]', '', yt.title)[:50]
+        return jsonify({
+            'title': yt.title,
+            'thumbnail': yt.thumbnail_url,
+            'duration': f"{yt.length // 60}:{str(yt.length % 60).zfill(2)}",
+            'channel': yt.author
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/backend/download', methods=['POST'])
+def download_video():
+    data = request.json
+    url = data.get('url')
+    quality = data.get('quality')
+    
+    if not url or not quality:
+        return jsonify({'error': 'Missing parameters'}), 400
         
-        # Select stream based on quality preference
-        if quality == 'highest':
+    try:
+        yt = YouTube(url)
+        
+        if quality == 'audio':
+            stream = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
+        elif quality == 'highest':
             stream = yt.streams.get_highest_resolution()
-        elif quality == 'audio':
-            stream = yt.streams.get_audio_only()
+        elif quality == '720p':
+            stream = yt.streams.filter(res="720p", progressive=True).first()
+        elif quality == '360p':
+            stream = yt.streams.filter(res="360p", progressive=True).first()
         else:
-            stream = yt.streams.filter(res=quality).first()
+            stream = yt.streams.get_highest_resolution()
         
         if not stream:
-            return jsonify({"error": "Requested quality not available"}), 400
-        
-        # Stream video to memory buffer
+            return jsonify({'error': 'No stream found for selected quality'}), 400
+
         buffer = BytesIO()
         stream.stream_to_buffer(buffer)
         buffer.seek(0)
         
-        # Send file directly to client
+        filename = sanitize_filename(yt.title)
+        extension = 'mp3' if quality == 'audio' else stream.subtype
+        
         return send_file(
             buffer,
             as_attachment=True,
-            download_name=f"{title}.mp4",
-            mimetype='video/mp4'
+            download_name=f'{filename}.{extension}',
+            mimetype=stream.mime_type
         )
-        
     except Exception as e:
-        logging.error(f"Download failed: {str(e)}")
-        return jsonify({"error": "Download failed", "details": str(e)}), 500
+        return jsonify({'error': str(e)}), 400
 
-@app.route('/')
-def health_check():
-    return "Video Download Backend is running"
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({'error': 'Endpoint not found'}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({'error': 'Internal server error'}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
