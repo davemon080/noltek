@@ -35,11 +35,10 @@ def get_formats():
                 format_id = f.get('format_id')
                 ext = f.get('ext')
                 height = f.get('height')
-                acodec = f.get('acodec')
                 vcodec = f.get('vcodec')
 
-                # Include only video formats with audio and proper resolution
-                if ext == 'mp4' and height and acodec != 'none':
+                # Accept all mp4 video-only formats
+                if ext == 'mp4' and height and vcodec != 'none':
                     resolution = f"{height}p"
                     if resolution not in filtered:
                         filtered[resolution] = {
@@ -49,7 +48,7 @@ def get_formats():
                         }
 
             if not filtered:
-                return jsonify({"error": "No valid MP4 formats with audio found."}), 400
+                return jsonify({"error": "No valid MP4 video formats found."}), 400
 
             return jsonify({
                 "formats": sorted(filtered.values(), key=lambda x: int(x['resolution'].replace('p', '')), reverse=True)
@@ -57,7 +56,6 @@ def get_formats():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 @app.route('/download', methods=['POST'])
 def download_video():
@@ -78,11 +76,10 @@ def download_video():
         'no_warnings': True,
         'cookiefile': COOKIE_FILE,
         'merge_output_format': 'mp4',
-        'postprocessors': [
-            {
-                'key': 'FFmpegMerger'
-            }
-        ]
+        'postprocessors': [{
+            'key': 'FFmpegVideoConvertor',
+            'preferedformat': 'mp4'  # Correct yt-dlp spelling
+        }]
     }
 
     try:
@@ -90,7 +87,6 @@ def download_video():
             info = ydl.extract_info(url)
             filename = ydl.prepare_filename(info)
 
-        # Ensure final .mp4 file exists
         final_file = os.path.splitext(filename)[0] + ".mp4"
         if not os.path.exists(final_file):
             return jsonify({"error": "Download failed. File not found."}), 500
@@ -99,10 +95,8 @@ def download_video():
             "file_id": os.path.splitext(os.path.basename(final_file))[0],
             "ext": 'mp4'
         })
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 @app.route('/download/<file_id>', methods=['GET'])
 def serve_file(file_id):
@@ -122,11 +116,9 @@ def serve_file(file_id):
 
     return jsonify({"error": "File not found"}), 404
 
-
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({"status": "ok"})
-
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
