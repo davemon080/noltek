@@ -1,88 +1,92 @@
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from pytube import YouTube
+from io import BytesIO
+import os
 import re
-import datetime
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}})
+CORS(app)  # Enable CORS for all routes
+
+def format_duration(seconds):
+    """Format duration in seconds to HH:MM:SS"""
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours > 0:
+        return f"{int(hours)}:{int(minutes):02d}:{int(seconds):02d}"
+    return f"{int(minutes)}:{int(seconds):02d}"
+
+def sanitize_filename(filename):
+    """Remove invalid characters from filename"""
+    return re.sub(r'[\\/*?:"<>|]', '', filename)
 
 @app.route('/metadata', methods=['POST'])
-def get_metadata():
+def metadata():
+    """Endpoint to fetch video metadata"""
     try:
         data = request.json
         url = data.get('url')
-        
         if not url:
             return jsonify({'error': 'URL is required'}), 400
-            
+        
         yt = YouTube(url)
-        
-        # Format duration
-        duration = str(datetime.timedelta(seconds=yt.length))
-        if duration.startswith('0:'):
-            duration = duration[2:]
-        
         return jsonify({
             'title': yt.title,
             'channel': yt.author,
-            'duration': duration,
+            'duration': format_duration(yt.length),
             'thumbnail': yt.thumbnail_url
         })
-        
     except Exception as e:
-        print(f'Metadata error: {str(e)}')
-        return jsonify({'error': 'Failed to fetch video metadata'}), 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/download', methods=['POST'])
-def download_video():
+def download():
+    """Endpoint to download video/audio"""
     try:
         data = request.json
         url = data.get('url')
-        format_type = data.get('format', 'video')
+        format = data.get('format', 'video')
         quality = data.get('quality', 'highest')
         
         if not url:
             return jsonify({'error': 'URL is required'}), 400
-            
+        
         yt = YouTube(url)
-        title = re.sub(r'[^\w\s]', '', yt.title)  # Sanitize filename
+        buffer = BytesIO()
         
-        # Get appropriate stream
-        if format_type == 'audio':
-            stream = yt.streams.filter(only_audio=True).order_by('abr').last()
-            filename = f'{title}.mp3'
-            content_type = 'audio/mpeg'
-        else:
+        if format == 'video':
+            # Handle video download
+            streams = yt.streams.filter(progressive=True, file_extension='mp4')
+            
             if quality == 'highest':
-                stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
-            else:
-                stream = yt.streams.filter(progressive=True, res=quality, file_extension='mp4').first()
-                if not stream:
-                    stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
-            filename = f'{title}.mp4'
-            content_type = 'video/mp4'
-
-        if not stream:
-            return jsonify({'error': 'No suitable stream found'}), 400
-
-        # Stream directly to user
-        headers = {
-            'Content-Disposition': f'attachment; filename="{filename}"',
-            'Content-Type': content_type,
-            'Content-Length': str(stream.filesize)
-        }
-        
-        # Create streaming response
-        def generate():
-            for chunk in stream.stream():
-                yield chunk
+                stream = streams.get_highest_resolution()
+            elif quality == '720p':
+                stream = streams.filter(res='720p').first()
+            elif quality == '360p':
+                stream = streams.filter(res='360p').first()
+            else:  # Fallback to highest quality
+                stream = streams.get_highest_resolution()
                 
-        return Response(generate(), headers=headers)
+            stream.stream_to_buffer(buffer)
+            filename = sanitize_filename(f"{yt.title}.mp4")
+            mimetype = 'video/mp4'
+            
+        else:  # Audio format
+            stream = yt.streams.filter(only_audio=True).first()
+            stream.stream_to_buffer(buffer)
+            filename = sanitize_filename(f"{yt.title}.mp3")
+            mimetype = 'audio/mpeg'
+        
+        buffer.seek(0)
+        return send_file(
+            buffer,
+            as_attachment=True,
+            download_name=filename,
+            mimetype=mimetype
+        )
         
     except Exception as e:
-        print(f'Download error: {str(e)}')
-        return jsonify({'error': 'Failed to download video'}), 500
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5000, debug=True)
