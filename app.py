@@ -11,7 +11,6 @@ DOWNLOAD_FOLDER = "downloads"
 COOKIE_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-
 @app.route('/formats', methods=['POST'])
 def get_formats():
     data = request.get_json()
@@ -30,32 +29,32 @@ def get_formats():
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             formats = info.get('formats', [])
-
-            filtered = []
+            filtered = {}
 
             for f in formats:
                 format_id = f.get('format_id')
                 ext = f.get('ext')
                 height = f.get('height')
-                vcodec = f.get('vcodec')
 
-                if ext == 'mp4' and vcodec != 'none' and height:
-                    filtered.append({
-                        'format_id': format_id,
-                        'ext': ext,
-                        'resolution': f"{height}p"
-                    })
+                # Accept mp4 with height (even if video/audio separate)
+                if ext == 'mp4' and height:
+                    resolution = f"{height}p"
+                    if resolution not in filtered:
+                        filtered[resolution] = {
+                            'format_id': format_id,
+                            'ext': ext,
+                            'resolution': resolution
+                        }
 
             if not filtered:
                 return jsonify({"error": "No valid MP4 formats found."}), 400
 
-            # Sort from low to high resolution
-            sorted_formats = sorted(filtered, key=lambda x: int(x['resolution'].replace('p', '')))
-            return jsonify({"formats": sorted_formats})
+            return jsonify({
+                "formats": sorted(filtered.values(), key=lambda x: int(x['resolution'].replace('p', '')))
+            })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 @app.route('/download', methods=['POST'])
 def download_video():
@@ -68,43 +67,32 @@ def download_video():
 
     file_id = str(uuid.uuid4())
     output_template = os.path.join(DOWNLOAD_FOLDER, f"{file_id}.%(ext)s")
-    final_output = os.path.join(DOWNLOAD_FOLDER, f"{file_id}.mp4")
 
-ydl_opts = {
-    'format': f"{format_id}+bestaudio/best",
-    'outtmpl': output_template,
-    'quiet': True,
-    'no_warnings': True,
-    'cookiefile': COOKIE_FILE,
-    'merge_output_format': 'mp4',
-    'postprocessors': [{
-        'key': 'FFmpegMerger',
-        'preferredformat': 'mp4'
-    }]
-}
-
+    ydl_opts = {
+        'format': f"{format_id}+bestaudio/best",  # Combine video+audio
+        'outtmpl': output_template,
+        'quiet': True,
+        'no_warnings': True,
+        'cookiefile': COOKIE_FILE,
+        'merge_output_format': 'mp4',
+        'postprocessors': [{
+            'key': 'FFmpegMerger',
+            'preferredformat': 'mp4'
+        }]
+    }
 
     try:
         with YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
 
-        if os.path.exists(final_output):
-            return jsonify({
-                "file_id": file_id,
-                "ext": 'mp4'
-            })
-        else:
-            for f in os.listdir(DOWNLOAD_FOLDER):
-                if f.startswith(file_id) and f.endswith('.mp4'):
-                    return jsonify({
-                        "file_id": file_id,
-                        "ext": 'mp4'
-                    })
-
-        return jsonify({"error": "Download failed"}), 500
+        # Get the actual downloaded file name
+        final_file = f"{file_id}.mp4"
+        return jsonify({
+            "file_id": file_id,
+            "ext": 'mp4'
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 @app.route('/download/<file_id>', methods=['GET'])
 def serve_file(file_id):
@@ -113,7 +101,7 @@ def serve_file(file_id):
             file_path = os.path.join(DOWNLOAD_FOLDER, f)
 
             @after_this_request
-            def cleanup(response):
+            def delete_file(response):
                 try:
                     os.remove(file_path)
                 except Exception as e:
@@ -124,11 +112,9 @@ def serve_file(file_id):
 
     return jsonify({"error": "File not found"}), 404
 
-
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({"status": "ok"})
-
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
