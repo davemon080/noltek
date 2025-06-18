@@ -9,7 +9,7 @@ app = Flask(__name__)
 
 # Configure CORS: Allow specific origin (Netlify frontend) or use '*' for development
 frontend_url = os.environ.get('FRONTEND_URL', '*')
-CORS(app, origins=frontend_url)
+CORS(app, origins='https://noltek.netlify.app/')
 
 def sanitize_filename(name):
     """Remove invalid characters from filename"""
