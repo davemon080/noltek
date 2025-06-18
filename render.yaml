@@ -2,7 +2,11 @@ services:
   - type: web
     name: noltek-backend
     env: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: |
+  apt-get update
+  apt-get install -y ffmpeg
+  pip install -r requirements.txt
+
     startCommand: startCommand: gunicorn app:app
     envVars:
       - key: PORT
