@@ -35,8 +35,11 @@ def get_formats():
                 format_id = f.get('format_id')
                 ext = f.get('ext')
                 height = f.get('height')
+                acodec = f.get('acodec')
+                vcodec = f.get('vcodec')
 
-                if ext == 'mp4' and height:
+                # Include only video formats with audio and proper resolution
+                if ext == 'mp4' and height and acodec != 'none':
                     resolution = f"{height}p"
                     if resolution not in filtered:
                         filtered[resolution] = {
@@ -46,11 +49,12 @@ def get_formats():
                         }
 
             if not filtered:
-                return jsonify({"error": "No valid MP4 formats found."}), 400
+                return jsonify({"error": "No valid MP4 formats with audio found."}), 400
 
             return jsonify({
                 "formats": sorted(filtered.values(), key=lambda x: int(x['resolution'].replace('p', '')), reverse=True)
             })
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -76,8 +80,7 @@ def download_video():
         'merge_output_format': 'mp4',
         'postprocessors': [
             {
-                'key': 'FFmpegMerger',
-                'preferedformat': 'mp4'  # intentionally misspelled for yt_dlp
+                'key': 'FFmpegMerger'
             }
         ]
     }
@@ -87,19 +90,16 @@ def download_video():
             info = ydl.extract_info(url)
             filename = ydl.prepare_filename(info)
 
-        # Check if the final file exists with .mp4
+        # Ensure final .mp4 file exists
         final_file = os.path.splitext(filename)[0] + ".mp4"
         if not os.path.exists(final_file):
-            # fallback: maybe the file was already .mp4 and not renamed
-            final_file = filename if filename.endswith(".mp4") else None
-
-        if not final_file or not os.path.exists(final_file):
             return jsonify({"error": "Download failed. File not found."}), 500
 
         return jsonify({
             "file_id": os.path.splitext(os.path.basename(final_file))[0],
             "ext": 'mp4'
         })
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
