@@ -1,4 +1,6 @@
-Flask
-flask-cors
-yt-dlp
-gunicorn
+# requirements.txt for YouTube Video Download Backend
+flask==3.0.3
+flask-cors==4.0.1
+pytube==15.0.0
+gunicorn==21.2.0  # Required for deployment on platforms like Netlify/Heroku
+python-dotenv==1.0.1  # For environment variable management
