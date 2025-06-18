@@ -11,6 +11,7 @@ DOWNLOAD_FOLDER = "downloads"
 COOKIE_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
+
 @app.route('/formats', methods=['POST'])
 def get_formats():
     data = request.get_json()
@@ -30,17 +31,15 @@ def get_formats():
             info = ydl.extract_info(url, download=False)
             formats = info.get('formats', [])
             filtered = {}
-            
+
             for f in formats:
                 format_id = f.get('format_id')
                 ext = f.get('ext')
                 height = f.get('height')
-                acodec = f.get('acodec')
-                vcodec = f.get('vcodec')
 
-                if vcodec != 'none' and acodec != 'none' and ext == 'mp4' and height:
+                # Include formats with height and mp4 extension (even if audio/video is separate)
+                if ext == 'mp4' and height:
                     resolution = f"{height}p"
-                    # store the first mp4 format per resolution
                     if resolution not in filtered:
                         filtered[resolution] = {
                             'format_id': format_id,
@@ -48,10 +47,15 @@ def get_formats():
                             'resolution': resolution
                         }
 
-            # return sorted by resolution
-            return jsonify({"formats": sorted(filtered.values(), key=lambda x: int(x['resolution'].replace('p', '')))})
+            if not filtered:
+                return jsonify({"error": "No valid MP4 formats found."}), 400
+
+            return jsonify({
+                "formats": sorted(filtered.values(), key=lambda x: int(x['resolution'].replace('p', '')))
+            })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.route('/download', methods=['POST'])
 def download_video():
@@ -84,6 +88,7 @@ def download_video():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route('/download/<file_id>', methods=['GET'])
 def serve_file(file_id):
     for f in os.listdir(DOWNLOAD_FOLDER):
@@ -102,9 +107,11 @@ def serve_file(file_id):
 
     return jsonify({"error": "File not found"}), 404
 
+
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({"status": "ok"})
+
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
