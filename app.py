@@ -11,7 +11,6 @@ DOWNLOAD_FOLDER = "downloads"
 COOKIE_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-
 @app.route('/formats', methods=['POST'])
 def get_formats():
     data = request.get_json()
@@ -75,10 +74,12 @@ def download_video():
         'no_warnings': True,
         'cookiefile': COOKIE_FILE,
         'merge_output_format': 'mp4',
-        'postprocessors': [{
-            'key': 'FFmpegVideoConvertor',
-            'preferedformat': 'mp4'  # Misspelled on purpose for yt_dlp
-        }]
+        'postprocessors': [
+            {
+                'key': 'FFmpegMerger',
+                'preferedformat': 'mp4'  # intentionally misspelled for yt_dlp
+            }
+        ]
     }
 
     try:
@@ -86,9 +87,13 @@ def download_video():
             info = ydl.extract_info(url)
             filename = ydl.prepare_filename(info)
 
-        # Find the final .mp4 file after postprocessing
+        # Check if the final file exists with .mp4
         final_file = os.path.splitext(filename)[0] + ".mp4"
         if not os.path.exists(final_file):
+            # fallback: maybe the file was already .mp4 and not renamed
+            final_file = filename if filename.endswith(".mp4") else None
+
+        if not final_file or not os.path.exists(final_file):
             return jsonify({"error": "Download failed. File not found."}), 500
 
         return jsonify({
