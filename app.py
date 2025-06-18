@@ -16,34 +16,30 @@ os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 def download_video():
     data = request.get_json()
     url = data.get("url")
-    resolution = data.get("resolution", "720p")
+    resolution = data.get("resolution", "720p").replace("p", "")
 
-    if not url or not resolution:
-        return jsonify({"error": "Missing URL or resolution"}), 400
+    if not url or not resolution.isdigit():
+        return jsonify({"error": "Missing or invalid URL/resolution"}), 400
 
     file_id = str(uuid.uuid4())
     output_template = os.path.join(DOWNLOAD_FOLDER, f"{file_id}.%(ext)s")
-    target_height = int(resolution.replace("p", ""))
 
-    # Set yt-dlp options
     ydl_opts = {
-        'format': f'bestvideo[ext=mp4][height<={target_height}]+bestaudio[ext=m4a]/best[ext=mp4][height<={target_height}]',
+        'format': f'bestvideo[height={resolution}]+bestaudio/best',
         'outtmpl': output_template,
         'quiet': True,
         'no_warnings': True,
-        'merge_output_format': 'mp4',
         'cookiefile': COOKIE_FILE,
-        'postprocessors': [
-            {
-                'key': 'FFmpegMerger',
-                'preferredformat': 'mp4'
-            }
-        ]
+        'merge_output_format': 'mp4',
+        'postprocessors': [{
+            'key': 'FFmpegVideoConvertor',
+            'preferedformat': 'mp4'  # Correct spelling (yt-dlp uses 'preferedformat')
+        }]
     }
 
     try:
         with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
+            info = ydl.extract_info(url)
             filename = ydl.prepare_filename(info)
 
         final_file = os.path.splitext(filename)[0] + ".mp4"
