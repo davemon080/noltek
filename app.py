@@ -29,6 +29,7 @@ def get_formats():
             info = ydl.extract_info(url, download=False)
             formats = info.get('formats', [])
             filtered = []
+            seen_resolutions = set()
 
             for f in formats:
                 format_id = f.get('format_id')
@@ -37,14 +38,15 @@ def get_formats():
                 acodec = f.get('acodec')
                 vcodec = f.get('vcodec')
 
-                if vcodec == 'none' and acodec != 'none':
-                    resolution = 'audio only'
-                elif vcodec != 'none':
+                # Only include formats with both video and audio
+                if vcodec != 'none' and acodec != 'none':
                     resolution = f"{height}p" if height else 'unknown'
                 else:
                     continue
 
-                if resolution in ['audio only', '480p', '720p', '1080p', '1440p', '2160p']:
+                # Skip duplicates
+                if resolution not in seen_resolutions:
+                    seen_resolutions.add(resolution)
                     filtered.append({
                         'format_id': format_id,
                         'ext': ext,
