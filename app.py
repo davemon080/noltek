@@ -1,113 +1,77 @@
-from flask import Flask, request, jsonify, send_file, after_this_request
-from flask_cors import CORS
-from yt_dlp import YoutubeDL
+# app.py
+from flask import Flask, request, send_file, jsonify
+from flask_cors import CORS  # Added for Netlify frontend support
+from pytube import YouTube
+from io import BytesIO
 import os
-import uuid
+import re
+import logging
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}})
 
-DOWNLOAD_FOLDER = "downloads"
-COOKIE_FILE = "cookies.txt"
-os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+# Configure CORS for Netlify frontend
+CORS(app, resources={
+    r"/download": {
+        "origins": os.environ.get('ALLOWED_ORIGINS', 'https://noltek.netlify.app/')
+    }
+})
 
-@app.route('/download', methods=['POST'])
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+
+@app.route('/download', methods=['POST', 'OPTIONS'])  # Added OPTIONS for preflight
 def download_video():
-    data = request.get_json()
-    url = data.get("url")
-    file_format = data.get("format")  # mp4 or mp3
-    resolution = data.get("resolution")  # 480p, 720p, etc.
-
-    if not url or not file_format or not resolution:
-        return jsonify({"error": "Missing required parameters"}), 400
-
-    file_id = str(uuid.uuid4())
-    output_template = os.path.join(DOWNLOAD_FOLDER, f"{file_id}.%(ext)s")
-
-    # yt-dlp expects numeric resolution
-    res_value = resolution.replace("p", "")
-
-    if file_format == "mp3":
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': output_template,
-            'quiet': True,
-            'no_warnings': True,
-            'cookiefile': COOKIE_FILE,
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }]
-        }
-        ext = 'mp3'
-    else:  # mp4
-        ydl_opts = {
-            'format': f'bestvideo[height={res_value}][ext=mp4]+bestaudio[ext=m4a]/best[height={res_value}][ext=mp4]/best',
-            'outtmpl': output_template,
-            'quiet': True,
-            'no_warnings': True,
-            'cookiefile': COOKIE_FILE,
-            'merge_output_format': 'mp4'
-        }
-        ext = 'mp4'
-
+    if request.method == 'OPTIONS':
+        # Handle CORS preflight request
+        response = jsonify({'status': 'preflight'})
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Allow-Methods', 'POST')
+        return response
+        
     try:
-        with YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-            return jsonify({
-                "file_id": file_id,
-                "ext": ext
-            })
+        data = request.get_json()
+        url = data.get('url')
+        quality = data.get('quality', 'highest')
+        
+        if not url:
+            return jsonify({"error": "Missing URL parameter"}), 400
+        
+        # Sanitize filename
+        yt = YouTube(url)
+        title = re.sub(r'[^\w\s-]', '', yt.title)[:50]
+        
+        # Select stream based on quality preference
+        if quality == 'highest':
+            stream = yt.streams.get_highest_resolution()
+        elif quality == 'audio':
+            stream = yt.streams.get_audio_only()
+        else:
+            stream = yt.streams.filter(res=quality).first()
+        
+        if not stream:
+            return jsonify({"error": "Requested quality not available"}), 400
+        
+        # Stream video to memory buffer
+        buffer = BytesIO()
+        stream.stream_to_buffer(buffer)
+        buffer.seek(0)
+        
+        # Send file directly to client
+        return send_file(
+            buffer,
+            as_attachment=True,
+            download_name=f"{title}.mp4",
+            mimetype='video/mp4'
+        )
+        
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logging.error(f"Download failed: {str(e)}")
+        return jsonify({"error": "Download failed", "details": str(e)}), 500
 
-@app.route('/metadata', methods=['POST'])
-def get_metadata():
-    data = request.get_json()
-    url = data.get("url")
-
-    if not url:
-        return jsonify({"error": "No URL provided"}), 400
-
-    try:
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'cookiefile': COOKIE_FILE
-        }
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            return jsonify({
-                "title": info.get("title"),
-                "thumbnail": info.get("thumbnail"),
-                "duration": info.get("duration_string", "unknown"),
-                "uploader": info.get("uploader", "")
-            })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/download/<file_id>', methods=['GET'])
-def serve_file(file_id):
-    for f in os.listdir(DOWNLOAD_FOLDER):
-        if f.startswith(file_id):
-            file_path = os.path.join(DOWNLOAD_FOLDER, f)
-
-            @after_this_request
-            def cleanup(response):
-                try:
-                    os.remove(file_path)
-                except Exception as e:
-                    app.logger.error(f"File cleanup error: {e}")
-                return response
-
-            return send_file(file_path, as_attachment=True)
-    return jsonify({"error": "File not found"}), 404
-
-@app.route('/health', methods=['GET'])
-def health():
-    return jsonify({"status": "ok"})
+@app.route('/')
+def health_check():
+    return "Video Download Backend is running"
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
