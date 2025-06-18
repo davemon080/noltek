@@ -70,18 +70,19 @@ def download_video():
     output_template = os.path.join(DOWNLOAD_FOLDER, f"{file_id}.%(ext)s")
     final_output = os.path.join(DOWNLOAD_FOLDER, f"{file_id}.mp4")
 
-    ydl_opts = {
-        'format': f"{format_id}+bestaudio/best",
-        'outtmpl': output_template,
-        'quiet': True,
-        'no_warnings': True,
-        'cookiefile': COOKIE_FILE,
-        'merge_output_format': 'mp4',
-        'postprocessors': [{
-            'key': 'FFmpegMerger',
-            'preferedformat': 'mp4'
-        }]
-    }
+ydl_opts = {
+    'format': f"{format_id}+bestaudio/best",
+    'outtmpl': output_template,
+    'quiet': True,
+    'no_warnings': True,
+    'cookiefile': COOKIE_FILE,
+    'merge_output_format': 'mp4',
+    'postprocessors': [{
+        'key': 'FFmpegMerger',
+        'preferredformat': 'mp4'
+    }]
+}
+
 
     try:
         with YoutubeDL(ydl_opts) as ydl:
