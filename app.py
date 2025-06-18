@@ -25,35 +25,31 @@ def get_formats():
             'no_warnings': True,
             'cookiefile': COOKIE_FILE
         }
+
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             formats = info.get('formats', [])
-            filtered = []
-            seen_resolutions = set()
-
+            filtered = {}
+            
             for f in formats:
                 format_id = f.get('format_id')
                 ext = f.get('ext')
-                height = f.get('height', 0)
+                height = f.get('height')
                 acodec = f.get('acodec')
                 vcodec = f.get('vcodec')
 
-                # Only include formats with both video and audio
-                if vcodec != 'none' and acodec != 'none':
-                    resolution = f"{height}p" if height else 'unknown'
-                else:
-                    continue
+                if vcodec != 'none' and acodec != 'none' and ext == 'mp4' and height:
+                    resolution = f"{height}p"
+                    # store the first mp4 format per resolution
+                    if resolution not in filtered:
+                        filtered[resolution] = {
+                            'format_id': format_id,
+                            'ext': ext,
+                            'resolution': resolution
+                        }
 
-                # Skip duplicates
-                if resolution not in seen_resolutions:
-                    seen_resolutions.add(resolution)
-                    filtered.append({
-                        'format_id': format_id,
-                        'ext': ext,
-                        'resolution': resolution
-                    })
-
-            return jsonify({"formats": filtered})
+            # return sorted by resolution
+            return jsonify({"formats": sorted(filtered.values(), key=lambda x: int(x['resolution'].replace('p', '')))})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -67,23 +63,23 @@ def download_video():
         return jsonify({"error": "Missing URL or format ID"}), 400
 
     file_id = str(uuid.uuid4())
-    output_template = os.path.join(DOWNLOAD_FOLDER, f"{file_id}.%(ext)s")
+    output_template = os.path.join(DOWNLOAD_FOLDER, f"{file_id}.mp4")
 
     ydl_opts = {
         'format': format_id,
         'outtmpl': output_template,
         'quiet': True,
         'no_warnings': True,
-        'cookiefile': COOKIE_FILE
+        'cookiefile': COOKIE_FILE,
+        'merge_output_format': 'mp4'
     }
 
     try:
         with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            ext = info.get('ext') or 'mp4'
+            ydl.download([url])
             return jsonify({
                 "file_id": file_id,
-                "ext": ext
+                "ext": 'mp4'
             })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -91,7 +87,7 @@ def download_video():
 @app.route('/download/<file_id>', methods=['GET'])
 def serve_file(file_id):
     for f in os.listdir(DOWNLOAD_FOLDER):
-        if f.startswith(file_id):
+        if f.startswith(file_id) and f.endswith('.mp4'):
             file_path = os.path.join(DOWNLOAD_FOLDER, f)
 
             @after_this_request
