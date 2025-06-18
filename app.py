@@ -6,7 +6,9 @@ import os
 import re
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+
+# Configure CORS to allow your frontend domain
+CORS(app, resources={r"/*": {"origins": "https://noltek.netlify.app"}})
 
 def format_duration(seconds):
     """Format duration in seconds to HH:MM:SS"""
