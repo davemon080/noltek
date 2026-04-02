@@ -65,19 +65,17 @@ export default function Feed({ profile }: FeedProps) {
     const unsubscribeJobs = supabaseService.subscribeToJobs((allJobs) => setJobs(allJobs.slice(0, 3)));
     const unsubscribeLikes = supabaseService.subscribeToPostLikes(setLikes);
     const unsubscribeComments = supabaseService.subscribeToAllPostComments(setComments);
-
-    const fetchTopStudents = async () => {
-      const users = await supabaseService.listUsersPaginated(TOP_ACTIVE_LIMIT + 1, 0);
+    const unsubscribeUsers = supabaseService.subscribeToAllUsers((users) => {
       setHasMoreTopStudents(users.length > TOP_ACTIVE_LIMIT);
       setTopStudents(users.slice(0, TOP_ACTIVE_LIMIT));
-    };
-    fetchTopStudents();
+    });
 
     return () => {
       unsubscribePosts();
       unsubscribeJobs();
       unsubscribeLikes();
       unsubscribeComments();
+      unsubscribeUsers();
     };
   }, []);
 

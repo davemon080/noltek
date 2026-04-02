@@ -28,27 +28,37 @@ export default function Profile({ profile: loggedInProfile }: ProfileProps) {
 
   useEffect(() => {
     if (!uid) return;
-    let active = true;
     setLoading(true);
-    Promise.all([
-      supabaseService.getUserProfile(uid),
-      supabaseService.getPostsByUser(uid),
-      supabaseService.getApprovedCompanyPartnerRequestByUserUid(uid),
-    ])
-      .then(([profile, profilePosts, partner]) => {
-        if (!active) return;
-        setUserProfile(profile);
-        setDraft(profile || {});
-        setPosts(profilePosts);
-        setCompanyPartner(partner);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
+
+    let initialized = false;
+    const finishInitialLoad = () => {
+      if (initialized) return;
+      initialized = true;
+      setLoading(false);
     };
-  }, [uid]);
+
+    const unsubscribeProfile = supabaseService.subscribeToUserProfile(uid, (profile) => {
+      setUserProfile(profile);
+      setDraft((prev) => (Object.keys(prev).length > 0 && editing ? prev : profile || {}));
+      finishInitialLoad();
+    });
+
+    const unsubscribePosts = supabaseService.subscribeToPostsByUser(uid, (profilePosts) => {
+      setPosts(profilePosts);
+      finishInitialLoad();
+    });
+
+    const unsubscribePartners = supabaseService.subscribeToApprovedCompanyPartnerRequests(50, (partners) => {
+      setCompanyPartner(partners.find((item) => item.userUid === uid) || null);
+      finishInitialLoad();
+    });
+
+    return () => {
+      unsubscribeProfile();
+      unsubscribePosts();
+      unsubscribePartners();
+    };
+  }, [editing, uid]);
 
   const completion = useMemo(() => {
     if (!userProfile) return 0;

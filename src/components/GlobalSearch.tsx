@@ -40,31 +40,24 @@ export default function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
 
   useEffect(() => {
     if (!isOpen || loadedOnce) return;
-    let active = true;
     setLoading(true);
 
-    Promise.all([
-      supabaseService.getAllUsers(),
-      supabaseService.listJobs(),
-      supabaseService.listPosts(50),
-      supabaseService.listMarketItems(),
-      supabaseService.listApprovedCompanyPartnerRequests(25),
-    ])
-      .then(([allUsers, allJobs, allPosts, allMarketItems, approvedPartners]) => {
-        if (!active) return;
-        setUsers(allUsers);
-        setJobs(allJobs);
-        setPosts(allPosts);
-        setMarketItems(allMarketItems);
-        setPartners(approvedPartners);
-        setLoadedOnce(true);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    const unsubscribeUsers = supabaseService.subscribeToAllUsers((allUsers) => {
+      setUsers(allUsers);
+      setLoadedOnce(true);
+      setLoading(false);
+    });
+    const unsubscribeJobs = supabaseService.subscribeToJobs(setJobs);
+    const unsubscribePosts = supabaseService.subscribeToPosts((allPosts) => setPosts(allPosts.slice(0, 50)));
+    const unsubscribeMarket = supabaseService.subscribeToMarketItems(setMarketItems);
+    const unsubscribePartners = supabaseService.subscribeToApprovedCompanyPartnerRequests(25, setPartners);
 
     return () => {
-      active = false;
+      unsubscribeUsers();
+      unsubscribeJobs();
+      unsubscribePosts();
+      unsubscribeMarket();
+      unsubscribePartners();
     };
   }, [isOpen, loadedOnce]);
 

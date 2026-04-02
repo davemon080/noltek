@@ -55,7 +55,39 @@ export default function Wallets({ profile }: WalletsProps) {
   };
 
   useEffect(() => {
-    loadWalletData();
+    setLoading(true);
+    setError(null);
+
+    const unsubscribeWallet = supabaseService.subscribeToWallet(
+      profile.uid,
+      (walletData) => {
+        setWallet(walletData);
+        setLoading(false);
+      },
+      (nextError) => {
+        setError(nextError?.message || 'Failed to load wallet.');
+        setLoading(false);
+      }
+    );
+
+    const unsubscribeTransactions = supabaseService.subscribeToWalletTransactions(
+      profile.uid,
+      (tx) => {
+        setTransactions(tx);
+        setLoading(false);
+      },
+      (nextError) => {
+        setError(nextError?.message || 'Failed to load wallet transactions.');
+        setLoading(false);
+      }
+    );
+
+    supabaseService.hasTransactionPin(profile.uid).then(setPinEnabled).catch(() => undefined);
+
+    return () => {
+      unsubscribeWallet();
+      unsubscribeTransactions();
+    };
   }, [profile.uid]);
 
   const availableBalance = useMemo(() => {

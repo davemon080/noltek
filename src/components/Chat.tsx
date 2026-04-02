@@ -16,11 +16,9 @@ import {
   PlusSquare,
   Search,
   Send,
-  Smile,
-  Video,
   X,
 } from 'lucide-react';
-import { Attachment, Message, UserProfile } from '../types';
+import type { Attachment, Message, UserProfile } from '../types';
 import { supabaseService } from '../services/supabaseService';
 import CachedImage from './CachedImage';
 
@@ -46,27 +44,7 @@ type PresenceInfo = {
   updatedAt?: string;
 };
 
-type KeyboardPane = 'keys' | 'emoji';
-type KeyboardLayout = 'letters' | 'symbols';
-
 const LONG_PRESS_DELAY_MS = 520;
-const LETTER_ROWS = [
-  ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
-  ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
-  ['z', 'x', 'c', 'v', 'b', 'n', 'm'],
-];
-const SYMBOL_ROWS = [
-  ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
-  ['@', '#', '$', '&', '*', '(', ')', '-', '+'],
-  ['.', ',', '?', '!', ':', ';', '/', '"', "'"],
-];
-const QUICK_PHRASES = ['Hello', 'Thanks', 'On it', 'Can we talk?', 'I have an update', 'Please check this'];
-const EMOJI_GROUPS = [
-  { label: 'Faces', items: ['😀', '😂', '😍', '🥹', '😎', '🤔', '😭', '😴'] },
-  { label: 'Gestures', items: ['👍', '👏', '🙌', '🤝', '🙏', '👌', '💪', '👀'] },
-  { label: 'Work', items: ['🔥', '✅', '📌', '🧠', '💼', '📅', '📎', '💬'] },
-  { label: 'Mood', items: ['❤️', '✨', '🎉', '🌍', '🚀', '🎯', '⚡', '💡'] },
-];
 
 function mergeChatSummaries(incoming: ChatSummary[], existing: ChatSummary[] = []) {
   const map = new Map<string, ChatSummary>();
@@ -203,21 +181,16 @@ export default function Chat({ profile }: ChatProps) {
   const [onlineUserIds, setOnlineUserIds] = React.useState<Set<string>>(new Set());
   const [presenceState, setPresenceState] = React.useState<Record<string, PresenceInfo>>({});
   const [unreadCounts, setUnreadCounts] = React.useState<Record<string, number>>({});
-  const [showKeyboard, setShowKeyboard] = React.useState(false);
-  const [keyboardPane, setKeyboardPane] = React.useState<KeyboardPane>('keys');
-  const [keyboardLayout, setKeyboardLayout] = React.useState<KeyboardLayout>('letters');
-  const [keyboardShift, setKeyboardShift] = React.useState(true);
   const [composerHeight, setComposerHeight] = React.useState(88);
-  const [keyboardHeight, setKeyboardHeight] = React.useState(0);
+  const [keyboardInset, setKeyboardInset] = React.useState(0);
+  const [inputFocused, setInputFocused] = React.useState(false);
 
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const composerRef = React.useRef<HTMLDivElement>(null);
-  const keyboardRef = React.useRef<HTMLDivElement>(null);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const attachmentMenuRef = React.useRef<HTMLDivElement>(null);
   const initialLoadRef = React.useRef(true);
-  const selectionRef = React.useRef({ start: 0, end: 0 });
   const holdTimeoutRef = React.useRef<number | null>(null);
   const typingTimeoutRef = React.useRef<number | null>(null);
 
@@ -225,7 +198,7 @@ export default function Chat({ profile }: ChatProps) {
   const selectedContactPresence = selectedContact ? presenceState[selectedContact.uid] : undefined;
   const selectedContactOnline = selectedContact ? onlineUserIds.has(selectedContact.uid) : false;
   const selectedContactTyping = selectedContactPresence?.typingTo === profile.uid;
-  const conversationBottomPadding = composerHeight + (showKeyboard ? keyboardHeight : 0) + 32;
+  const conversationBottomPadding = composerHeight + keyboardInset + 32;
 
   const filteredActiveChats = React.useMemo(() => {
     const query = sidebarSearchQuery.trim().toLowerCase();
@@ -260,48 +233,18 @@ export default function Chat({ profile }: ChatProps) {
     [activeChats, allUsers, selectedContact]
   );
 
-  const syncSelection = React.useCallback(
-    (start?: number, end?: number) => {
-      const input = inputRef.current;
-      const nextStart = Math.max(0, Math.min(start ?? input?.selectionStart ?? newMessage.length, newMessage.length));
-      const nextEnd = Math.max(nextStart, Math.min(end ?? input?.selectionEnd ?? nextStart, newMessage.length));
-      selectionRef.current = { start: nextStart, end: nextEnd };
-    },
-    [newMessage.length]
-  );
-
-  const focusInput = React.useCallback((cursorPosition?: number) => {
+  const focusInput = React.useCallback(() => {
     window.setTimeout(() => {
       const input = inputRef.current;
       if (!input) return;
       input.focus({ preventScroll: true });
-      const nextCursor = Math.max(0, Math.min(cursorPosition ?? selectionRef.current.end, input.value.length));
-      input.setSelectionRange(nextCursor, nextCursor);
-      selectionRef.current = { start: nextCursor, end: nextCursor };
-    }, 20);
-  }, []);
-
-  const openKeyboard = React.useCallback(
-    (pane: KeyboardPane = 'keys', cursorPosition?: number) => {
-      setKeyboardPane(pane);
-      setShowKeyboard(true);
-      focusInput(cursorPosition);
-    },
-    [focusInput]
-  );
-
-  const hideKeyboard = React.useCallback(() => {
-    setShowKeyboard(false);
-    setKeyboardPane('keys');
+      const cursor = input.value.length;
+      input.setSelectionRange(cursor, cursor);
+    }, 24);
   }, []);
 
   const updateChatRow = React.useCallback((otherUid: string, user: UserProfile, lastMessage: string, updatedAt: string) => {
-    setActiveChats((prev) =>
-      mergeChatSummaries(
-        [{ otherUid, user, lastMessage, updatedAt }],
-        prev
-      )
-    );
+    setActiveChats((prev) => mergeChatSummaries([{ otherUid, user, lastMessage, updatedAt }], prev));
   }, []);
 
   const clearUnreadForChat = React.useCallback((otherUid: string) => {
@@ -335,11 +278,10 @@ export default function Chat({ profile }: ChatProps) {
       setEditingMessageId(null);
       setSelectedFiles([]);
       setShowAttachmentMenu(false);
-      hideKeyboard();
       setSearchParams({}, { replace: true });
       navigate('/messages', { replace: replaceHistory });
     },
-    [hideKeyboard, navigate, setSearchParams]
+    [navigate, setSearchParams]
   );
 
   const openConversation = React.useCallback(
@@ -355,13 +297,12 @@ export default function Chat({ profile }: ChatProps) {
       setMessagesError(null);
       setEditingMessageId(null);
       setSelectedFiles([]);
-      hideKeyboard();
       if (options?.syncUrl !== false) {
         setSearchParams({ uid: otherUid });
       }
       supabaseService.markMessagesAsRead(profile.uid, otherUid).catch(() => undefined);
     },
-    [clearUnreadForChat, hideKeyboard, profile.uid, setSearchParams, updateChatRow]
+    [clearUnreadForChat, profile.uid, setSearchParams, updateChatRow]
   );
 
   const adjustComposerHeight = React.useCallback(() => {
@@ -370,64 +311,6 @@ export default function Chat({ profile }: ChatProps) {
     input.style.height = '0px';
     input.style.height = `${Math.min(input.scrollHeight, 168)}px`;
   }, []);
-
-  const insertAtSelection = React.useCallback(
-    (replacement: string, options?: { keepShift?: boolean }) => {
-      const start = Math.max(0, Math.min(selectionRef.current.start, newMessage.length));
-      const end = Math.max(start, Math.min(selectionRef.current.end, newMessage.length));
-      const nextValue = `${newMessage.slice(0, start)}${replacement}${newMessage.slice(end)}`;
-      const nextCursor = start + replacement.length;
-      setNewMessage(nextValue);
-      if (!options?.keepShift && keyboardLayout === 'letters' && keyboardShift && /[a-z]/i.test(replacement)) {
-        setKeyboardShift(false);
-      }
-      if (/[.!?]\s*$/.test(replacement)) {
-        setKeyboardShift(true);
-      }
-      openKeyboard(keyboardPane, nextCursor);
-    },
-    [keyboardLayout, keyboardPane, keyboardShift, newMessage, openKeyboard]
-  );
-
-  const insertKeyboardValue = React.useCallback(
-    (value: string) => {
-      const nextValue = keyboardLayout === 'letters' && keyboardShift ? value.toUpperCase() : value;
-      insertAtSelection(nextValue);
-    },
-    [insertAtSelection, keyboardLayout, keyboardShift]
-  );
-
-  const deleteBeforeCursor = React.useCallback(() => {
-    const { start, end } = selectionRef.current;
-    if (start !== end) {
-      insertAtSelection('', { keepShift: true });
-      return;
-    }
-    if (start === 0) return;
-    selectionRef.current = { start: start - 1, end };
-    const nextValue = `${newMessage.slice(0, start - 1)}${newMessage.slice(end)}`;
-    setNewMessage(nextValue);
-    openKeyboard(keyboardPane, start - 1);
-  }, [insertAtSelection, keyboardPane, newMessage, openKeyboard]);
-
-  const moveCursor = React.useCallback(
-    (direction: 'left' | 'right') => {
-      const delta = direction === 'left' ? -1 : 1;
-      const nextCursor = Math.max(0, Math.min(selectionRef.current.end + delta, newMessage.length));
-      openKeyboard(keyboardPane, nextCursor);
-    },
-    [keyboardPane, newMessage.length, openKeyboard]
-  );
-
-  const insertQuickPhrase = React.useCallback(
-    (phrase: string) => {
-      const prefix = newMessage.trim() ? `${newMessage}${newMessage.endsWith(' ') ? '' : ' '}` : '';
-      const nextValue = `${prefix}${phrase}`;
-      setNewMessage(nextValue);
-      openKeyboard(keyboardPane, nextValue.length);
-    },
-    [keyboardPane, newMessage, openKeyboard]
-  );
 
   const removeFile = React.useCallback((index: number) => {
     setSelectedFiles((prev) => prev.filter((_, fileIndex) => fileIndex !== index));
@@ -468,7 +351,8 @@ export default function Chat({ profile }: ChatProps) {
     const files = Array.from(event.target.files);
     setSelectedFiles((prev) => [...prev, ...files]);
     event.target.value = '';
-  }, []);
+    focusInput();
+  }, [focusInput]);
 
   const handleEditMessage = React.useCallback(
     (message: LocalMessage) => {
@@ -476,11 +360,9 @@ export default function Chat({ profile }: ChatProps) {
       setEditingMessageId(message.id);
       setNewMessage(message.content);
       setMessageActionsMessage(null);
-      setKeyboardLayout('letters');
-      setKeyboardShift(false);
-      openKeyboard('keys', message.content.length);
+      focusInput();
     },
-    [openKeyboard, profile.uid]
+    [focusInput, profile.uid]
   );
 
   const handleDeleteMessage = React.useCallback(
@@ -527,7 +409,7 @@ export default function Chat({ profile }: ChatProps) {
           await supabaseService.updateMessage(editingMessageId, profile.uid, trimmedMessage);
           setEditingMessageId(null);
           setNewMessage('');
-          setKeyboardShift(true);
+          focusInput();
         } catch (nextError) {
           console.error('Error editing message:', nextError);
           setError('Failed to update message.');
@@ -563,8 +445,8 @@ export default function Chat({ profile }: ChatProps) {
       );
       setNewMessage('');
       setSelectedFiles([]);
-      setKeyboardShift(true);
       supabaseService.setPresenceTyping(null);
+      focusInput();
 
       if (files.length > 0) {
         setActiveUploads((prev) => prev + 1);
@@ -596,7 +478,7 @@ export default function Chat({ profile }: ChatProps) {
         );
         if (trimmedMessage && !newMessage) {
           setNewMessage(trimmedMessage);
-          openKeyboard('keys', trimmedMessage.length);
+          focusInput();
         }
       } finally {
         if (files.length > 0) {
@@ -606,8 +488,8 @@ export default function Chat({ profile }: ChatProps) {
     },
     [
       editingMessageId,
+      focusInput,
       newMessage,
-      openKeyboard,
       profile.uid,
       selectedContact,
       selectedFiles,
@@ -627,11 +509,7 @@ export default function Chat({ profile }: ChatProps) {
 
   React.useEffect(() => {
     adjustComposerHeight();
-    syncSelection(
-      Math.min(selectionRef.current.start, newMessage.length),
-      Math.min(selectionRef.current.end, newMessage.length)
-    );
-  }, [adjustComposerHeight, newMessage, syncSelection]);
+  }, [adjustComposerHeight, newMessage]);
 
   React.useEffect(() => {
     const composerElement = composerRef.current;
@@ -641,38 +519,34 @@ export default function Chat({ profile }: ChatProps) {
     });
     observer.observe(composerElement);
     return () => observer.disconnect();
-  }, [selectedContact, showKeyboard, editingMessageId, selectedFiles.length, newMessage]);
+  }, [editingMessageId, selectedContact, selectedFiles.length, newMessage]);
 
   React.useEffect(() => {
-    const keyboardElement = keyboardRef.current;
-    if (!keyboardElement || typeof ResizeObserver === 'undefined') {
-      setKeyboardHeight(showKeyboard ? 300 : 0);
-      return;
-    }
-    const observer = new ResizeObserver(([entry]) => {
-      setKeyboardHeight(showKeyboard ? entry.contentRect.height : 0);
-    });
-    observer.observe(keyboardElement);
-    return () => observer.disconnect();
-  }, [showKeyboard, keyboardPane, keyboardLayout]);
+    if (typeof window === 'undefined') return;
 
-  React.useEffect(() => {
-    if (!showKeyboard) {
-      setKeyboardHeight(0);
-    }
-  }, [showKeyboard]);
+    const viewport = window.visualViewport;
+    const updateInset = () => {
+      const viewportHeight = viewport?.height ?? window.innerHeight;
+      const offsetTop = viewport?.offsetTop ?? 0;
+      const inset = Math.max(0, window.innerHeight - viewportHeight - offsetTop);
+      setKeyboardInset(inset > 80 ? inset : 0);
+    };
 
-  React.useEffect(() => supabaseService.subscribeToOnlineUsers((uids) => setOnlineUserIds(new Set(uids))), []);
+    updateInset();
+    window.addEventListener('resize', updateInset);
+    viewport?.addEventListener('resize', updateInset);
+    viewport?.addEventListener('scroll', updateInset);
 
-  React.useEffect(() => {
-    return supabaseService.subscribeToPresenceState((state) => {
-      setPresenceState(state);
-    });
+    return () => {
+      window.removeEventListener('resize', updateInset);
+      viewport?.removeEventListener('resize', updateInset);
+      viewport?.removeEventListener('scroll', updateInset);
+    };
   }, []);
 
-  React.useEffect(() => {
-    return supabaseService.subscribeToUnreadMessageCounts(profile.uid, setUnreadCounts);
-  }, [profile.uid]);
+  React.useEffect(() => supabaseService.subscribeToOnlineUsers((uids) => setOnlineUserIds(new Set(uids))), []);
+  React.useEffect(() => supabaseService.subscribeToPresenceState((state) => setPresenceState(state)), []);
+  React.useEffect(() => supabaseService.subscribeToUnreadMessageCounts(profile.uid, setUnreadCounts), [profile.uid]);
 
   React.useEffect(() => {
     const unsubscribe = supabaseService.subscribeToActiveChats(
@@ -732,9 +606,7 @@ export default function Chat({ profile }: ChatProps) {
       })
       .catch((nextError) => {
         console.error('Error loading target user:', nextError);
-        if (!cancelled) {
-          setError('Failed to load that conversation.');
-        }
+        if (!cancelled) setError('Failed to load that conversation.');
       })
       .finally(() => {
         initialLoadRef.current = false;
@@ -868,7 +740,7 @@ export default function Chat({ profile }: ChatProps) {
 
   React.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages, selectedContact?.uid, selectedContactTyping]);
+  }, [inputFocused, keyboardInset, messages, selectedContact?.uid, selectedContactTyping]);
 
   React.useEffect(() => {
     if (!showAttachmentMenu) return;
@@ -1059,9 +931,6 @@ export default function Chat({ profile }: ChatProps) {
             <div className="relative min-h-0 flex-1">
               <div
                 className="absolute inset-0 overflow-y-auto px-3 py-4 md:px-6 md:py-5"
-                onClick={() => {
-                  if (showKeyboard) hideKeyboard();
-                }}
                 style={{
                   backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(15, 23, 42, 0.05) 1px, transparent 0)',
                   backgroundSize: '24px 24px',
@@ -1204,10 +1073,15 @@ export default function Chat({ profile }: ChatProps) {
 
                 <div ref={messagesEndRef} />
               </div>
+
               <div
                 ref={composerRef}
-                className="absolute inset-x-0 z-20 border-t border-gray-200 bg-[#f0f2f5] px-3 py-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)]"
-                style={{ bottom: showKeyboard ? keyboardHeight : 0 }}
+                className="absolute inset-x-0 z-20 border-t border-gray-200 bg-[#f0f2f5] px-3 py-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] transition-[bottom,transform] duration-200 ease-out"
+                style={{
+                  bottom: keyboardInset,
+                  paddingBottom: 'max(8px, env(safe-area-inset-bottom))',
+                  transform: inputFocused || keyboardInset > 0 ? 'translateY(-6px)' : 'translateY(0)',
+                }}
               >
                 {selectedFiles.length > 0 && (
                   <div className="mb-3 flex flex-wrap gap-2 rounded-2xl bg-white/80 p-2">
@@ -1262,7 +1136,7 @@ export default function Chat({ profile }: ChatProps) {
                             className="absolute bottom-full left-0 mb-3 min-w-[200px] rounded-3xl border border-gray-100 bg-white p-2 shadow-xl"
                           >
                             <AttachmentMenuButton
-                              icon={<Video size={18} />}
+                              icon={<ImageIcon size={18} />}
                               iconClassName="bg-pink-50 text-pink-600"
                               label="Camera"
                               onClick={() => {
@@ -1299,40 +1173,31 @@ export default function Chat({ profile }: ChatProps) {
                       </AnimatePresence>
                     </div>
 
-                    <input
-                      type="file"
-                      multiple
-                      ref={fileInputRef}
-                      onChange={handleFileSelect}
-                      className="hidden"
-                    />
+                    <input type="file" multiple ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
                   </div>
 
                   <div className="relative flex-1 rounded-[1.75rem] bg-white shadow-sm">
                     <textarea
                       ref={inputRef}
                       rows={1}
-                      readOnly
-                      inputMode="none"
                       value={newMessage}
-                      onClick={() => {
-                        syncSelection();
-                        openKeyboard('keys', inputRef.current?.selectionStart ?? newMessage.length);
+                      onChange={(event) => setNewMessage(event.target.value)}
+                      onFocus={() => {
+                        setInputFocused(true);
+                        window.setTimeout(() => {
+                          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                        }, 120);
                       }}
-                      onFocus={() => openKeyboard('keys', inputRef.current?.selectionStart ?? newMessage.length)}
-                      onSelect={() => syncSelection()}
+                      onBlur={() => {
+                        window.setTimeout(() => setInputFocused(false), 120);
+                      }}
                       placeholder={editingMessageId ? 'Edit your message' : 'Type a message'}
-                      className="max-h-40 w-full resize-none overflow-y-auto rounded-[1.75rem] border-transparent bg-transparent px-4 py-3 pr-12 text-[15px] text-gray-900 focus:outline-none focus:ring-0"
+                      autoComplete="off"
+                      autoCorrect="on"
+                      spellCheck
+                      enterKeyHint="send"
+                      className="max-h-40 w-full resize-none overflow-y-auto rounded-[1.75rem] border-transparent bg-transparent px-4 py-3 text-[15px] text-gray-900 caret-teal-600 focus:outline-none focus:ring-0"
                     />
-                    <button
-                      type="button"
-                      onClick={() => openKeyboard(showKeyboard && keyboardPane === 'emoji' ? 'keys' : 'emoji', selectionRef.current.end)}
-                      className={`absolute right-2 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full transition-all ${
-                        showKeyboard && keyboardPane === 'emoji' ? 'bg-teal-50 text-teal-600' : 'text-gray-400 hover:text-gray-600'
-                      }`}
-                    >
-                      <Smile size={18} />
-                    </button>
                   </div>
 
                   {(newMessage.trim() || selectedFiles.length > 0) && (
@@ -1354,7 +1219,6 @@ export default function Chat({ profile }: ChatProps) {
                       onClick={() => {
                         setEditingMessageId(null);
                         setNewMessage('');
-                        setKeyboardShift(true);
                       }}
                       className="font-bold text-red-600"
                     >
@@ -1363,132 +1227,6 @@ export default function Chat({ profile }: ChatProps) {
                   </div>
                 )}
               </div>
-
-              {showKeyboard && (
-                <div
-                  ref={keyboardRef}
-                  className="absolute inset-x-0 bottom-0 z-10 overflow-hidden rounded-t-[1.6rem] border border-b-0 border-slate-200 bg-gradient-to-b from-slate-50 to-white shadow-[0_-12px_28px_rgba(15,23,42,0.12)]"
-                >
-                  <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => setKeyboardPane('keys')}
-                        className={`rounded-full px-3 py-1.5 text-[11px] font-black uppercase tracking-wider transition-all ${
-                          keyboardPane === 'keys' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
-                        }`}
-                      >
-                        Keyboard
-                      </button>
-                      <button
-                        type="button"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => setKeyboardPane('emoji')}
-                        className={`rounded-full px-3 py-1.5 text-[11px] font-black uppercase tracking-wider transition-all ${
-                          keyboardPane === 'emoji' ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-600'
-                        }`}
-                      >
-                        Emoji
-                      </button>
-                    </div>
-                    <div className="h-1.5 w-16 rounded-full bg-slate-200" />
-                  </div>
-
-                  <div className="border-b border-slate-100 px-2.5 py-1.5">
-                    <div className="flex gap-2 overflow-x-auto pb-1 custom-scrollbar">
-                      {QUICK_PHRASES.map((phrase) => (
-                        <button
-                          key={phrase}
-                          type="button"
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => insertQuickPhrase(phrase)}
-                          className="shrink-0 rounded-full bg-gray-100 px-2.5 py-1.5 text-[11px] font-semibold text-gray-700 transition-all hover:bg-teal-50 hover:text-teal-700"
-                        >
-                          {phrase}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {keyboardPane === 'keys' ? (
-                    <div className="space-y-1.5 bg-gradient-to-b from-slate-100 to-slate-200/80 px-2 py-2.5 pb-[max(10px,env(safe-area-inset-bottom))]">
-                      {(keyboardLayout === 'letters' ? LETTER_ROWS : SYMBOL_ROWS).map((row, rowIndex) => (
-                        <div
-                          key={`${keyboardLayout}-${rowIndex}`}
-                          className={`grid gap-1.5 ${
-                            rowIndex === 1
-                              ? 'grid-cols-9 px-3 sm:px-6'
-                              : rowIndex === 2
-                              ? 'grid-cols-[auto_repeat(7,minmax(0,1fr))_auto]'
-                              : 'grid-cols-10'
-                          }`}
-                        >
-                          {rowIndex === 2 && (
-                            <KeyboardKey
-                              className={`text-[10px] uppercase tracking-wider ${
-                                keyboardShift ? 'bg-teal-600 text-white hover:bg-teal-700 hover:text-white' : 'text-slate-700'
-                              }`}
-                              onClick={() => setKeyboardShift((prev) => !prev)}
-                            >
-                              Shift
-                            </KeyboardKey>
-                          )}
-
-                          {row.map((key) => (
-                            <KeyboardKey key={key} onClick={() => insertKeyboardValue(key)}>
-                              {keyboardLayout === 'letters' && keyboardShift ? key.toUpperCase() : key}
-                            </KeyboardKey>
-                          ))}
-
-                          {rowIndex === 2 && (
-                            <KeyboardKey className="bg-slate-900 text-[10px] uppercase tracking-wider text-white hover:bg-black hover:text-white" onClick={deleteBeforeCursor}>
-                              Del
-                            </KeyboardKey>
-                          )}
-                        </div>
-                      ))}
-
-                      <div className="grid grid-cols-[auto_auto_1fr_auto_auto] gap-1.5">
-                        <KeyboardKey className="text-[10px] uppercase tracking-wider" onClick={() => setKeyboardLayout((prev) => (prev === 'letters' ? 'symbols' : 'letters'))}>
-                          {keyboardLayout === 'letters' ? '123' : 'ABC'}
-                        </KeyboardKey>
-                        <KeyboardKey className="text-[10px] uppercase tracking-wider" onClick={() => insertAtSelection('\n', { keepShift: true })}>
-                          Enter
-                        </KeyboardKey>
-                        <KeyboardKey onClick={() => insertAtSelection(' ', { keepShift: true })}>Space</KeyboardKey>
-                        <KeyboardKey className="text-[10px] uppercase tracking-wider" onClick={() => moveCursor('left')}>
-                          Left
-                        </KeyboardKey>
-                        <KeyboardKey className="text-[10px] uppercase tracking-wider" onClick={() => moveCursor('right')}>
-                          Right
-                        </KeyboardKey>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="max-h-[28vh] space-y-2 overflow-y-auto bg-gradient-to-b from-amber-50 to-white px-3 py-2.5 pb-[max(10px,env(safe-area-inset-bottom))]">
-                      {EMOJI_GROUPS.map((group) => (
-                        <div key={group.label} className="space-y-1.5">
-                          <p className="px-1 text-[11px] font-black uppercase tracking-wider text-slate-400">{group.label}</p>
-                          <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-8">
-                            {group.items.map((emoji) => (
-                              <button
-                                key={`${group.label}-${emoji}`}
-                                type="button"
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => insertAtSelection(emoji, { keepShift: true })}
-                                className="rounded-[1rem] bg-white px-2.5 py-2.5 text-xl shadow-sm transition-all hover:-translate-y-0.5 hover:bg-teal-50"
-                              >
-                                {emoji}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           </>
         ) : (
@@ -1569,7 +1307,7 @@ export default function Chat({ profile }: ChatProps) {
                       <div className="min-w-0">
                         <p className="truncate text-sm font-bold text-gray-900">{user.displayName}</p>
                         <p className="truncate text-xs text-gray-500">
-                          {user.publicId || user.uid} • {user.role}
+                          {user.publicId || user.uid} · {user.role}
                         </p>
                       </div>
                     </button>
@@ -1652,23 +1390,6 @@ export default function Chat({ profile }: ChatProps) {
           </BottomSheet>
         )}
       </AnimatePresence>
-
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 6px;
-          height: 6px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: #cbd5e1;
-          border-radius: 999px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: #94a3b8;
-        }
-      `}</style>
     </div>
   );
 }
@@ -1692,27 +1413,6 @@ function AttachmentMenuButton({
     >
       <span className={`inline-flex h-10 w-10 items-center justify-center rounded-xl ${iconClassName}`}>{icon}</span>
       {label}
-    </button>
-  );
-}
-
-function KeyboardKey({
-  children,
-  className = '',
-  onClick,
-}: {
-  children: React.ReactNode;
-  className?: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onMouseDown={(event) => event.preventDefault()}
-      onClick={onClick}
-      className={`min-h-[44px] rounded-[0.95rem] bg-white px-2 py-2 text-[15px] font-bold text-slate-800 shadow-sm transition-all hover:bg-teal-50 hover:text-teal-700 active:scale-[0.98] ${className}`}
-    >
-      {children}
     </button>
   );
 }

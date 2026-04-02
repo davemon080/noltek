@@ -56,21 +56,26 @@ export default function Network({ profile }: NetworkProps) {
   };
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        await loadMoreUsers(true);
-        const posts = await supabaseService.getHighlights(10);
-        const approvedPartners = await supabaseService.listApprovedCompanyPartnerRequests(15);
-        setHighlights(posts);
-        setPartners(approvedPartners);
-      } catch (error) {
-        console.error('Error fetching network data:', error);
-      } finally {
+    const unsubscribeUsers = supabaseService.subscribeToAllUsers(
+      (items) => {
+        setUsers(items.filter((item) => item.uid !== profile.uid));
+        setOffset(0);
+        setHasMoreUsers(false);
+        setLoading(false);
+      },
+      (nextError) => {
+        console.error('Error fetching network users:', nextError);
         setLoading(false);
       }
-    };
+    );
 
-    fetchData();
+    const unsubscribePosts = supabaseService.subscribeToPosts((items) => {
+      setHighlights(items.slice(0, 10));
+    });
+
+    const unsubscribePartners = supabaseService.subscribeToApprovedCompanyPartnerRequests(15, (approvedPartners) => {
+      setPartners(approvedPartners);
+    });
 
     const unsubscribeRequests = supabaseService.subscribeToIncomingFriendRequests(
       profile.uid,
@@ -88,6 +93,9 @@ export default function Network({ profile }: NetworkProps) {
     );
 
     return () => {
+      unsubscribeUsers();
+      unsubscribePosts();
+      unsubscribePartners();
       unsubscribeRequests();
       unsubscribeOutgoing();
       unsubscribeConnections();

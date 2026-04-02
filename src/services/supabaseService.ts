@@ -1093,6 +1093,19 @@ export const supabaseService = {
     return subscribeToTable('users', fetcher, callback, `uid=eq.${uid}`, onError, `user:${uid}`);
   },
 
+  subscribeToAllUsers(callback: (profiles: UserProfile[]) => void, onError?: (error: any) => void) {
+    const fetcher = async () => {
+      const rows = await runQuery<DbUserProfile[]>(
+        supabase.from('users').select('*').order('created_at', { ascending: false }),
+        'subscribeToAllUsers'
+      );
+      const profiles = rows.map(mapUserProfileFromDb);
+      profiles.forEach((profile) => this.profileCache.set(profile.uid, profile));
+      return profiles;
+    };
+    return subscribeToTable('users', fetcher, callback, undefined, onError, 'users:all');
+  },
+
   async getUsersByUids(uids: string[]): Promise<UserProfile[]> {
     const uniqueUids = Array.from(new Set(uids.filter(Boolean)));
     if (uniqueUids.length === 0) return [];
@@ -1367,6 +1380,17 @@ export const supabaseService = {
     const mapped = rows.map(mapPostFromDb);
     writeCache(cacheKey, mapped);
     return mapped;
+  },
+
+  subscribeToPostsByUser(uid: string, callback: (posts: Post[]) => void, onError?: (error: any) => void) {
+    const fetcher = async () => {
+      const rows = await runQuery<DbPost[]>(
+        supabase.from('posts').select('*').eq('author_uid', uid).order('created_at', { ascending: false }),
+        `subscribeToPostsByUser:${uid}`
+      );
+      return rows.map(mapPostFromDb);
+    };
+    return subscribeToTable('posts', fetcher, callback, `author_uid=eq.${uid}`, onError, `posts:user:${uid}`);
   },
 
   async getHighlights(limitCount: number): Promise<Post[]> {
@@ -1910,6 +1934,27 @@ export const supabaseService = {
       'listApprovedCompanyPartnerRequests'
     );
     return rows.map(mapCompanyPartnerRequestFromDb);
+  },
+
+  subscribeToApprovedCompanyPartnerRequests(
+    limitCount: number,
+    callback: (requests: CompanyPartnerRequest[]) => void,
+    onError?: (error: any) => void
+  ) {
+    const cacheKey = `partner:approved:${limitCount}`;
+    const fetcher = async () => {
+      const rows = await runQuery<DbCompanyPartnerRequest[]>(
+        supabase
+          .from('company_partner_requests')
+          .select('*')
+          .eq('status', 'approved')
+          .order('created_at', { ascending: false })
+          .limit(limitCount),
+        `subscribeToApprovedCompanyPartnerRequests:${limitCount}`
+      );
+      return rows.map(mapCompanyPartnerRequestFromDb);
+    };
+    return subscribeToTable('company_partner_requests', fetcher, callback, `status=eq.approved`, onError, cacheKey);
   },
 
   async listMarketSellerRatings(): Promise<MarketSellerRating[]> {
@@ -2855,6 +2900,27 @@ export const supabaseService = {
     const mapped = rows.map(mapWalletTransactionFromDb);
     writeCache(cacheKey, mapped);
     return mapped;
+  },
+
+  subscribeToWallet(uid: string, callback: (wallet: Wallet) => void, onError?: (error: any) => void) {
+    const fetcher = async () => this.getOrCreateWallet(uid);
+    return subscribeToTable('wallets', fetcher, callback, `user_uid=eq.${uid}`, onError, `wallet:${uid}`);
+  },
+
+  subscribeToWalletTransactions(
+    uid: string,
+    callback: (transactions: WalletTransaction[]) => void,
+    onError?: (error: any) => void
+  ) {
+    const fetcher = async () => this.listWalletTransactions(uid);
+    return subscribeToTable(
+      'wallet_transactions',
+      fetcher,
+      callback,
+      `user_uid=eq.${uid}`,
+      onError,
+      `wallet:transactions:${uid}`
+    );
   },
 
   async hasTransactionPin(uid: string): Promise<boolean> {
