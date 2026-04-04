@@ -1,4 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
+import { getErrorMessage } from '../utils/errors';
 
 interface Props {
   children: ReactNode;
@@ -32,7 +33,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
           errorMessage = `Data Error: ${parsedError.error} during ${parsedError.operationType} at ${parsedError.path}`;
         }
       } catch (e) {
-        errorMessage = this.state.error?.message || errorMessage;
+        errorMessage = getErrorMessage(this.state.error, errorMessage);
       }
 
       return (

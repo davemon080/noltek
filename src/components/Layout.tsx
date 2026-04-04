@@ -111,6 +111,7 @@ export default function Layout({ children, user, profile, onLogout }: LayoutProp
             <CachedImage
               src={profile.photoURL}
               alt={profile.displayName}
+              fallbackMode="avatar"
               wrapperClassName="w-10 h-10 rounded-full border border-gray-200"
               imgClassName="w-full h-full rounded-full object-cover"
             />

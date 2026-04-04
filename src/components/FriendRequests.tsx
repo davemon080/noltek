@@ -141,6 +141,7 @@ export default function FriendRequests({ profile }: FriendRequestsProps) {
           <Link to={`/profile/${targetUid}`} className="shrink-0">
             <CachedImage
               src={avatar}
+              fallbackMode="avatar"
               loading="lazy"
               decoding="async"
               referrerPolicy="no-referrer"

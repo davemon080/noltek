@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { UserProfile, Post, Job, PostLike, PostComment } from '../types';
+import { UserProfile, Post, Job, PostLike, PostComment, UserPerformanceSummary } from '../types';
 import { supabaseService } from '../services/supabaseService';
 import { Image, Send, Briefcase, Star, MapPin, DollarSign, Plus, X, Heart, MessageCircle, Share2, Copy, Link as LinkIcon, Pencil, Trash2, MoreVertical, Flag } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { useCurrency } from '../context/CurrencyContext';
 import { formatMoneyFromUSD } from '../utils/currency';
+import { getErrorMessage } from '../utils/errors';
 import CachedImage from './CachedImage';
 import { useConfirmDialog } from './ConfirmDialog';
 
@@ -33,11 +34,13 @@ export default function Feed({ profile }: FeedProps) {
   const [copied, setCopied] = useState(false);
   const [openPostMenuId, setOpenPostMenuId] = useState<string | null>(null);
   const [postActionToast, setPostActionToast] = useState<string | null>(null);
+  const [feedMessage, setFeedMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [topStudents, setTopStudents] = useState<UserProfile[]>(() => initialFeedSnapshot?.topStudents || []);
   const [hasMoreTopStudents, setHasMoreTopStudents] = useState(() => initialFeedSnapshot?.hasMoreTopStudents || false);
   const [profileByUid, setProfileByUid] = useState<Record<string, UserProfile>>(() => initialFeedSnapshot?.profileByUid || {});
+  const [performanceByUid, setPerformanceByUid] = useState<Record<string, UserPerformanceSummary>>({});
   const [onlineUserIds, setOnlineUserIds] = useState<Set<string>>(new Set());
   const navigate = useNavigate();
   const { confirm, confirmDialog } = useConfirmDialog();
@@ -108,10 +111,38 @@ export default function Feed({ profile }: FeedProps) {
   }, [profile]);
 
   const topStudentsPreview = useMemo(() => topStudents.slice(0, 3), [topStudents]);
+  const ownPerformance = performanceByUid[profile.uid] || { gigsCompleted: 0, ratingAverage: 0, ratingCount: 0 };
+
+  useEffect(() => {
+    const relevantUids = Array.from(new Set([profile.uid, ...topStudents.map((student) => student.uid)]));
+    let active = true;
+
+    const loadPerformance = () => {
+      supabaseService
+        .getUserPerformanceSummaries(relevantUids)
+        .then((summary) => {
+          if (active) setPerformanceByUid(summary);
+        })
+        .catch(() => {
+          if (active) setPerformanceByUid({});
+        });
+    };
+
+    loadPerformance();
+    const unsubscribeRatings = supabaseService.subscribeToMarketSellerRatings(loadPerformance);
+    const statsInterval = window.setInterval(loadPerformance, 30000);
+
+    return () => {
+      active = false;
+      unsubscribeRatings();
+      window.clearInterval(statsInterval);
+    };
+  }, [profile.uid, topStudents]);
 
   const handleCreatePost = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPostContent.trim() && !postImageFile) return;
+    setFeedMessage(null);
     const content = newPostContent;
     const selectedImage = postImageFile;
 
@@ -150,8 +181,9 @@ export default function Feed({ profile }: FeedProps) {
         type: 'social',
       });
       setPosts((prev) => prev.map((p) => (p.id === optimistic.id ? inserted : p)));
-    } catch {
-      // If upload/insert fails, feed remains unchanged and user can retry.
+    } catch (error) {
+      setPosts((prev) => prev.filter((item) => !item.id.startsWith('temp-')));
+      setFeedMessage(getErrorMessage(error, 'We could not publish your post right now. Please try again.'));
     } finally {
       setBackgroundPostingCount((prev) => Math.max(0, prev - 1));
       setIsPosting(false);
@@ -173,6 +205,7 @@ export default function Feed({ profile }: FeedProps) {
   const handleToggleLike = async (postId: string) => {
     if (postId.startsWith('temp-')) return;
     if (likingPostIds.includes(postId)) return;
+    setFeedMessage(null);
     const shouldLike = !likedPostIds.has(postId);
     const previousLikes = likes;
     setLikingPostIds((prev) => [...prev, postId]);
@@ -194,8 +227,9 @@ export default function Feed({ profile }: FeedProps) {
       await supabaseService.setPostLike(postId, profile.uid, shouldLike);
       const refreshed = await supabaseService.listPostLikes();
       setLikes(refreshed);
-    } catch {
+    } catch (error) {
       setLikes(previousLikes);
+      setFeedMessage(getErrorMessage(error, 'We could not update your like right now.'));
     } finally {
       setLikingPostIds((prev) => prev.filter((id) => id !== postId));
     }
@@ -325,11 +359,13 @@ export default function Feed({ profile }: FeedProps) {
             <p className="text-sm text-gray-500 mb-4 capitalize">{profile.role}</p>
             <div className="pt-4 border-t border-gray-100 flex justify-around text-center">
               <div>
-                <p className="text-lg font-bold text-teal-700">12</p>
+                <p className="text-lg font-bold text-teal-700">{ownPerformance.gigsCompleted}</p>
                 <p className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Gigs</p>
               </div>
               <div>
-                <p className="text-lg font-bold text-teal-700">4.9</p>
+                <p className="text-lg font-bold text-teal-700">
+                  {ownPerformance.ratingCount > 0 ? ownPerformance.ratingAverage.toFixed(1) : 'New'}
+                </p>
                 <p className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Rating</p>
               </div>
             </div>
@@ -353,6 +389,11 @@ export default function Feed({ profile }: FeedProps) {
       </div>
 
       <div className="lg:col-span-6 space-y-4 sm:space-y-6">
+        {feedMessage && (
+          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+            {feedMessage}
+          </div>
+        )}
         {backgroundPostingCount > 0 && (
           <div className="sticky top-20 z-20 bg-amber-50 border border-amber-200 text-amber-800 text-xs sm:text-sm font-semibold rounded-xl px-4 py-2.5">
             {backgroundPostingCount === 1 ? 'Your post is updating in background...' : `${backgroundPostingCount} posts are updating in background...`}
@@ -374,6 +415,7 @@ export default function Feed({ profile }: FeedProps) {
                       <CachedImage
                         src={profileByUid[post.authorUid]?.photoURL || post.authorPhoto}
                         alt={post.authorName}
+                        fallbackMode="avatar"
                         loading="lazy"
                         decoding="async"
                         referrerPolicy="no-referrer"
@@ -475,6 +517,7 @@ export default function Feed({ profile }: FeedProps) {
                   <CachedImage
                     src={post.imageUrl}
                     alt="Post content"
+                    fallbackMode="post"
                     loading="lazy"
                     decoding="async"
                     wrapperClassName="mt-3 sm:mt-4 rounded-xl w-full max-h-64 sm:max-h-96"

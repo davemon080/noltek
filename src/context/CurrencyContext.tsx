@@ -10,13 +10,23 @@ const CurrencyContext = createContext<CurrencyContextValue | undefined>(undefine
 const STORAGE_KEY = 'connect_preferred_currency';
 
 export function CurrencyProvider({ children }: { children: React.ReactNode }) {
-  const [currency, setCurrencyState] = useState<WalletCurrency>('USD');
+  const [currency, setCurrencyState] = useState<WalletCurrency>(() => {
+    if (typeof window === 'undefined') return 'USD';
+    const saved = localStorage.getItem(STORAGE_KEY);
+    return saved === 'USD' || saved === 'NGN' || saved === 'EUR' ? saved : 'USD';
+  });
 
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === 'USD' || saved === 'NGN' || saved === 'EUR') {
-      setCurrencyState(saved);
-    }
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== STORAGE_KEY) return;
+      const nextCurrency = event.newValue;
+      if (nextCurrency === 'USD' || nextCurrency === 'NGN' || nextCurrency === 'EUR') {
+        setCurrencyState(nextCurrency);
+      }
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
   }, []);
 
   const setCurrency = (nextCurrency: WalletCurrency) => {

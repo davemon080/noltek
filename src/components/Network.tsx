@@ -262,6 +262,7 @@ export default function Network({ profile }: NetworkProps) {
                     <CachedImage
                       src={user.photoURL}
                       alt={user.displayName}
+                      fallbackMode="avatar"
                       loading="lazy"
                       decoding="async"
                       referrerPolicy="no-referrer"
@@ -353,6 +354,7 @@ export default function Network({ profile }: NetworkProps) {
                       <CachedImage
                         src={partner.companyLogoUrl}
                         alt={partner.companyName}
+                        fallbackMode="logo"
                         loading="lazy"
                         decoding="async"
                         referrerPolicy="no-referrer"
@@ -388,6 +390,7 @@ export default function Network({ profile }: NetworkProps) {
                 <div className="p-4 flex items-center gap-3 border-b border-gray-50">
                   <CachedImage
                     src={profileByUid[post.authorUid]?.photoURL || post.authorPhoto}
+                    fallbackMode="avatar"
                     loading="lazy"
                     decoding="async"
                     referrerPolicy="no-referrer"
@@ -408,6 +411,7 @@ export default function Network({ profile }: NetworkProps) {
                   {post.imageUrl && (
                     <CachedImage
                       src={post.imageUrl}
+                      fallbackMode="post"
                       loading="lazy"
                       decoding="async"
                       wrapperClassName="w-full h-48 rounded-2xl mb-4"

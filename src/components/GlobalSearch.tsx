@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { Briefcase, Building2, FileText, Search, Settings, ShoppingBag, User, Wallet, X } from 'lucide-react';
 import { supabaseService } from '../services/supabaseService';
 import { CompanyPartnerRequest, Job, MarketItem, Post, UserProfile } from '../types';
+import { useCurrency } from '../context/CurrencyContext';
+import { formatAmountInCurrency, formatMoneyFromUSD } from '../utils/currency';
+import CachedImage from './CachedImage';
 
 interface GlobalSearchProps {
   isOpen: boolean;
@@ -14,11 +17,13 @@ type SearchResult = {
   title: string;
   subtitle: string;
   icon: React.ComponentType<{ size?: number }>;
+  imageSrc?: string;
+  imageFallbackMode?: 'avatar' | 'post' | 'media' | 'logo';
   action: () => void;
 };
 
 const staticPages: Array<{ id: string; title: string; subtitle: string; path: string; keywords: string[]; icon: SearchResult['icon'] }> = [
-  { id: 'page-feed', title: 'Feed', subtitle: 'Home • social updates and active freelancers', path: '/', keywords: ['feed', 'home', 'posts', 'freelancers'], icon: FileText },
+  { id: 'page-feed', title: 'Feed', subtitle: 'Home · social updates and active freelancers', path: '/', keywords: ['feed', 'home', 'posts', 'freelancers'], icon: FileText },
   { id: 'page-network', title: 'Network', subtitle: 'Discover users, highlights, and partners', path: '/network', keywords: ['network', 'discover', 'partners', 'connections'], icon: User },
   { id: 'page-jobs', title: 'Jobs', subtitle: 'Browse gigs and client opportunities', path: '/jobs', keywords: ['jobs', 'gigs', 'freelance', 'apply'], icon: Briefcase },
   { id: 'page-market', title: 'Market', subtitle: 'Buy and sell items', path: '/market', keywords: ['market', 'shop', 'sell', 'items'], icon: ShoppingBag },
@@ -29,6 +34,7 @@ const staticPages: Array<{ id: string; title: string; subtitle: string; path: st
 
 export default function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
   const navigate = useNavigate();
+  const { currency } = useCurrency();
   const [query, setQuery] = useState('');
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -78,8 +84,10 @@ export default function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
       .map((u) => ({
         id: `user-${u.uid}`,
         title: u.displayName,
-        subtitle: `Profile • ${u.role}`,
+        subtitle: `Profile · ${u.role}`,
         icon: User,
+        imageSrc: u.photoURL,
+        imageFallbackMode: 'avatar' as const,
         action: () => navigate(`/profile/${u.uid}`),
       }));
 
@@ -94,8 +102,10 @@ export default function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
       .map((partner) => ({
         id: `partner-${partner.id}`,
         title: partner.companyName,
-        subtitle: `Company • ${partner.location}`,
+        subtitle: `Company · ${partner.location}`,
         icon: Building2,
+        imageSrc: partner.companyLogoUrl,
+        imageFallbackMode: 'logo' as const,
         action: () => navigate(`/profile/${partner.userUid}`),
       }));
 
@@ -110,7 +120,7 @@ export default function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
       .map((j) => ({
         id: `job-${j.id}`,
         title: j.title,
-        subtitle: `Gig • ${j.category}`,
+        subtitle: `Gig · ${j.category} · ${formatMoneyFromUSD(j.budget, currency)}`,
         icon: Briefcase,
         action: () => navigate(`/jobs/${j.id}`),
       }));
@@ -126,8 +136,10 @@ export default function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
       .map((item) => ({
         id: `market-${item.id}`,
         title: item.title,
-        subtitle: `Market • ${item.category}`,
+        subtitle: `Market · ${item.category} · ${formatAmountInCurrency(item.price, item.priceCurrency, currency)}`,
         icon: ShoppingBag,
+        imageSrc: item.imageUrls[0],
+        imageFallbackMode: 'media' as const,
         action: () => navigate(`/market/${item.id}`),
       }));
 
@@ -141,8 +153,10 @@ export default function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
       .map((p) => ({
         id: `post-${p.id}`,
         title: p.authorName,
-        subtitle: `Post • ${p.content.slice(0, 72)}${p.content.length > 72 ? '...' : ''}`,
+        subtitle: `Post · ${p.content.slice(0, 72)}${p.content.length > 72 ? '...' : ''}`,
         icon: FileText,
+        imageSrc: p.imageUrl || p.authorPhoto,
+        imageFallbackMode: p.imageUrl ? ('post' as const) : ('avatar' as const),
         action: () => navigate(`/profile/${p.authorUid}`),
       }));
 
@@ -160,7 +174,7 @@ export default function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
       }));
 
     return [...pageResults, ...partnerResults, ...userResults, ...jobResults, ...marketResults, ...postResults];
-  }, [jobs, marketItems, navigate, normalizedQuery, partners, posts, users]);
+  }, [currency, jobs, marketItems, navigate, normalizedQuery, partners, posts, users]);
 
   const handleResultClick = (action: () => void) => {
     action();
@@ -171,18 +185,18 @@ export default function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/45 backdrop-blur-sm flex items-start justify-center p-4 md:p-8">
-      <div className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-gray-200 overflow-hidden">
-        <div className="p-4 border-b border-gray-100 flex items-center gap-3">
+    <div className="fixed inset-0 z-[70] flex items-start justify-center bg-black/45 p-4 backdrop-blur-sm md:p-8">
+      <div className="w-full max-w-2xl overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-2xl">
+        <div className="flex items-center gap-3 border-b border-gray-100 p-4">
           <Search size={18} className="text-gray-400" />
           <input
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search market, gigs, partners, settings, and more..."
-            className="flex-1 text-sm md:text-base outline-none"
+            className="flex-1 text-sm outline-none md:text-base"
           />
-          <button onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100">
+          <button onClick={onClose} className="rounded-xl p-2 hover:bg-gray-100">
             <X size={18} className="text-gray-500" />
           </button>
         </div>
@@ -200,14 +214,24 @@ export default function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
               <button
                 key={result.id}
                 onClick={() => handleResultClick(result.action)}
-                className="w-full flex items-start gap-3 p-4 text-left hover:bg-gray-50 border-b border-gray-50"
+                className="flex w-full items-start gap-3 border-b border-gray-50 p-4 text-left hover:bg-gray-50"
               >
-                <div className="p-2 rounded-xl bg-gray-100 text-gray-700">
-                  <result.icon size={16} />
-                </div>
-                <div>
+                {result.imageSrc ? (
+                  <CachedImage
+                    src={result.imageSrc}
+                    alt={result.title}
+                    fallbackMode={result.imageFallbackMode || 'media'}
+                    wrapperClassName="h-11 w-11 rounded-xl border border-gray-100 bg-gray-100"
+                    imgClassName="h-full w-full rounded-xl object-cover"
+                  />
+                ) : (
+                  <div className="rounded-xl bg-gray-100 p-2 text-gray-700">
+                    <result.icon size={16} />
+                  </div>
+                )}
+                <div className="min-w-0">
                   <p className="text-sm font-semibold text-gray-900">{result.title}</p>
-                  <p className="text-xs text-gray-500">{result.subtitle}</p>
+                  <p className="truncate text-xs text-gray-500">{result.subtitle}</p>
                 </div>
               </button>
             ))}

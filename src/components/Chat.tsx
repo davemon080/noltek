@@ -4,6 +4,7 @@ import { format, isToday, isYesterday } from 'date-fns';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   ArrowLeft,
+  Camera,
   Check,
   CircleDollarSign,
   Download,
@@ -12,6 +13,7 @@ import {
   Loader2,
   Lock,
   MessageSquare,
+  Mic,
   MoreVertical,
   PlusSquare,
   Search,
@@ -33,6 +35,8 @@ type ChatSummary = {
   user: UserProfile;
   lastMessage: string;
   updatedAt: string;
+  lastMessageSenderUid?: string;
+  lastMessageReadAt?: string;
 };
 
 type PresenceInfo = {
@@ -163,6 +167,7 @@ export default function Chat({ profile }: ChatProps) {
   const [error, setError] = React.useState<string | null>(null);
   const [messagesLoading, setMessagesLoading] = React.useState(false);
   const [messagesError, setMessagesError] = React.useState<string | null>(null);
+  const [inlineError, setInlineError] = React.useState<string | null>(null);
   const [activeChats, setActiveChats] = React.useState<ChatSummary[]>([]);
   const [messages, setMessages] = React.useState<LocalMessage[]>([]);
   const [allUsers, setAllUsers] = React.useState<UserProfile[]>([]);
@@ -184,10 +189,14 @@ export default function Chat({ profile }: ChatProps) {
   const [composerHeight, setComposerHeight] = React.useState(88);
   const [keyboardInset, setKeyboardInset] = React.useState(0);
   const [inputFocused, setInputFocused] = React.useState(false);
+  const [viewportHeight, setViewportHeight] = React.useState(
+    typeof window !== 'undefined' ? window.visualViewport?.height ?? window.innerHeight : 0
+  );
 
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const composerRef = React.useRef<HTMLDivElement>(null);
+  const messagesContainerRef = React.useRef<HTMLDivElement>(null);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const attachmentMenuRef = React.useRef<HTMLDivElement>(null);
   const initialLoadRef = React.useRef(true);
@@ -195,10 +204,11 @@ export default function Chat({ profile }: ChatProps) {
   const typingTimeoutRef = React.useRef<number | null>(null);
 
   const uploading = activeUploads > 0;
+  const hasComposerValue = newMessage.trim().length > 0 || selectedFiles.length > 0;
   const selectedContactPresence = selectedContact ? presenceState[selectedContact.uid] : undefined;
   const selectedContactOnline = selectedContact ? onlineUserIds.has(selectedContact.uid) : false;
   const selectedContactTyping = selectedContactPresence?.typingTo === profile.uid;
-  const conversationBottomPadding = composerHeight + keyboardInset + 32;
+  const conversationBottomPadding = 24;
 
   const filteredActiveChats = React.useMemo(() => {
     const query = sidebarSearchQuery.trim().toLowerCase();
@@ -275,6 +285,7 @@ export default function Chat({ profile }: ChatProps) {
       setShowChatOnMobile(false);
       setMessages([]);
       setMessagesError(null);
+      setInlineError(null);
       setEditingMessageId(null);
       setSelectedFiles([]);
       setShowAttachmentMenu(false);
@@ -295,6 +306,7 @@ export default function Chat({ profile }: ChatProps) {
       updateChatRow(otherUid, user, options?.lastMessage || '', options?.updatedAt || new Date().toISOString());
       clearUnreadForChat(otherUid);
       setMessagesError(null);
+      setInlineError(null);
       setEditingMessageId(null);
       setSelectedFiles([]);
       if (options?.syncUrl !== false) {
@@ -374,10 +386,11 @@ export default function Chat({ profile }: ChatProps) {
           setEditingMessageId(null);
           setNewMessage('');
         }
+        setInlineError(null);
         setMessageActionsMessage(null);
       } catch (nextError) {
         console.error('Error deleting message:', nextError);
-        setError('Failed to delete message.');
+        setInlineError('Failed to delete message.');
       }
     },
     [editingMessageId, profile.uid]
@@ -387,11 +400,12 @@ export default function Chat({ profile }: ChatProps) {
     if (!selectedContact) return;
     try {
       await supabaseService.clearConversation(profile.uid, selectedContact.uid);
+      setInlineError(null);
       setChatActionsUser(null);
       closeConversation(true);
     } catch (nextError) {
       console.error('Error clearing chat:', nextError);
-      setError('Failed to clear chat.');
+      setInlineError('Failed to clear chat.');
     }
   }, [closeConversation, profile.uid, selectedContact]);
 
@@ -409,15 +423,17 @@ export default function Chat({ profile }: ChatProps) {
           await supabaseService.updateMessage(editingMessageId, profile.uid, trimmedMessage);
           setEditingMessageId(null);
           setNewMessage('');
+          setInlineError(null);
           focusInput();
         } catch (nextError) {
           console.error('Error editing message:', nextError);
-          setError('Failed to update message.');
+          setInlineError('Failed to update message.');
         }
         return;
       }
 
       if (files.length > 0 && uploading) return;
+      setInlineError(null);
 
       const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const createdAt = new Date().toISOString();
@@ -463,9 +479,10 @@ export default function Chat({ profile }: ChatProps) {
 
         setMessages((prev) => upsertRealtimeMessage(prev, sentMessage, profile.uid, selectedContact.uid));
         updateChatRow(selectedContact.uid, selectedContact, getPreviewText(sentMessage), sentMessage.createdAt);
+        setInlineError(null);
       } catch (nextError) {
         console.error('Error sending message:', nextError);
-        setError(files.length > 0 ? 'Failed to send message with attachments.' : 'Failed to send message.');
+        setInlineError(files.length > 0 ? 'Failed to send message with attachments.' : 'Failed to send message.');
         setMessages((prev) =>
           prev.map((message) =>
             message.id === tempId
@@ -529,6 +546,7 @@ export default function Chat({ profile }: ChatProps) {
       const viewportHeight = viewport?.height ?? window.innerHeight;
       const offsetTop = viewport?.offsetTop ?? 0;
       const inset = Math.max(0, window.innerHeight - viewportHeight - offsetTop);
+      setViewportHeight(Math.max(320, viewportHeight + offsetTop));
       setKeyboardInset(inset > 80 ? inset : 0);
     };
 
@@ -743,6 +761,31 @@ export default function Chat({ profile }: ChatProps) {
   }, [inputFocused, keyboardInset, messages, selectedContact?.uid, selectedContactTyping]);
 
   React.useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const handleViewportShift = () => {
+      const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 160;
+      if (!nearBottom) return;
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    };
+
+    const viewport = window.visualViewport;
+    viewport?.addEventListener('resize', handleViewportShift);
+    viewport?.addEventListener('scroll', handleViewportShift);
+    return () => {
+      viewport?.removeEventListener('resize', handleViewportShift);
+      viewport?.removeEventListener('scroll', handleViewportShift);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (!inlineError) return;
+    const timeout = window.setTimeout(() => setInlineError(null), 4200);
+    return () => window.clearTimeout(timeout);
+  }, [inlineError]);
+
+  React.useEffect(() => {
     if (!showAttachmentMenu) return;
     const handlePointerDown = (event: MouseEvent) => {
       if (!attachmentMenuRef.current?.contains(event.target as Node)) {
@@ -757,7 +800,7 @@ export default function Chat({ profile }: ChatProps) {
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center rounded-[2rem] border border-gray-200 bg-white">
+      <div className="flex h-full items-center justify-center bg-white">
         <div className="text-center">
           <Loader2 size={32} className="mx-auto animate-spin text-teal-600" />
           <p className="mt-3 text-sm font-medium text-gray-500">Loading conversations...</p>
@@ -768,7 +811,7 @@ export default function Chat({ profile }: ChatProps) {
 
   if (error) {
     return (
-      <div className="flex h-full flex-col items-center justify-center rounded-[2rem] border border-red-200 bg-white p-6 text-center">
+      <div className="flex h-full flex-col items-center justify-center bg-white p-6 text-center">
         <div className="rounded-2xl bg-red-50 px-4 py-3 text-red-700">
           <p className="font-bold">Something went wrong</p>
           <p className="mt-1 text-sm">{error}</p>
@@ -784,7 +827,10 @@ export default function Chat({ profile }: ChatProps) {
   }
 
   return (
-    <div className="relative flex h-[100dvh] overflow-hidden rounded-[2rem] border border-gray-200 bg-white shadow-sm md:h-screen">
+    <div
+      className="relative flex overflow-hidden bg-white md:h-screen"
+      style={{ height: isMobileLayout ? `${viewportHeight}px` : undefined }}
+    >
       <aside
         className={`${
           showChatOnMobile ? 'hidden md:flex' : 'flex'
@@ -816,7 +862,7 @@ export default function Chat({ profile }: ChatProps) {
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto bg-white">
+        <div className="min-h-0 flex-1 overflow-y-auto bg-white scroll-smooth">
           {filteredActiveChats.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center px-6 text-center">
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gray-50 text-gray-300">
@@ -857,6 +903,7 @@ export default function Chat({ profile }: ChatProps) {
                     <CachedImage
                       src={chat.user.photoURL}
                       alt={chat.user.displayName}
+                      fallbackMode="avatar"
                       wrapperClassName="h-14 w-14 rounded-2xl border border-gray-200 bg-gray-100"
                       imgClassName="h-full w-full rounded-2xl object-cover"
                     />
@@ -872,9 +919,16 @@ export default function Chat({ profile }: ChatProps) {
                       </span>
                     </div>
                     <div className="mt-1 flex items-center justify-between gap-3">
-                      <p className={`truncate text-xs font-medium ${typing ? 'text-emerald-600' : 'text-gray-500'}`}>
-                        {typing ? 'Typing...' : chat.lastMessage || chat.user.role}
-                      </p>
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        {!typing && chat.lastMessageSenderUid === profile.uid && (
+                          <ReceiptIcon
+                            state={chat.lastMessageReadAt ? 'read' : selectedContact?.uid === chat.otherUid && onlineUserIds.has(chat.user.uid) ? 'delivered' : 'sent'}
+                          />
+                        )}
+                        <p className={`truncate text-xs font-medium ${typing ? 'text-emerald-600' : 'text-gray-500'}`}>
+                          {typing ? 'Typing...' : chat.lastMessage || chat.user.role}
+                        </p>
+                      </div>
                       {unread > 0 && (
                         <span className="inline-flex min-w-[18px] items-center justify-center rounded-full bg-teal-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
                           {unread > 9 ? '9+' : unread}
@@ -889,10 +943,10 @@ export default function Chat({ profile }: ChatProps) {
         </div>
       </aside>
 
-      <section className={`${showChatOnMobile ? 'flex' : 'hidden md:flex'} relative min-h-0 flex-1 flex-col bg-[#efeae2]`}>
+      <section className={`${showChatOnMobile ? 'grid' : 'hidden md:grid'} min-h-0 flex-1 grid-rows-[auto,minmax(0,1fr),auto] bg-[#efeae2]`}>
         {selectedContact ? (
           <>
-            <header className="flex flex-none items-center justify-between border-b border-gray-200 bg-[#f0f2f5] px-4 py-3 shadow-sm">
+            <header className="flex flex-none items-center justify-between border-b border-black/5 bg-[#f7f7f5]/95 px-4 py-3 backdrop-blur-sm shadow-sm">
               <div className="flex min-w-0 items-center gap-3">
                 <button
                   onClick={() => closeConversation(true)}
@@ -905,6 +959,7 @@ export default function Chat({ profile }: ChatProps) {
                   <CachedImage
                     src={selectedContact.photoURL}
                     alt={selectedContact.displayName}
+                    fallbackMode="avatar"
                     wrapperClassName="h-11 w-11 rounded-2xl border border-gray-200 bg-white"
                     imgClassName="h-full w-full rounded-2xl object-cover"
                   />
@@ -928,16 +983,17 @@ export default function Chat({ profile }: ChatProps) {
               </button>
             </header>
 
-            <div className="relative min-h-0 flex-1">
-              <div
-                className="absolute inset-0 overflow-y-auto px-3 py-4 md:px-6 md:py-5"
-                style={{
-                  backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(15, 23, 42, 0.05) 1px, transparent 0)',
-                  backgroundSize: '24px 24px',
-                  paddingBottom: `${conversationBottomPadding}px`,
-                  WebkitTouchCallout: 'none',
-                }}
-              >
+            <div
+              ref={messagesContainerRef}
+              className="min-h-0 overflow-y-auto px-3 py-4 md:px-6 md:py-5 scroll-smooth overscroll-y-contain"
+              style={{
+                backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(15, 23, 42, 0.05) 1px, transparent 0)',
+                backgroundSize: '24px 24px',
+                paddingBottom: `${conversationBottomPadding}px`,
+                scrollPaddingBottom: `${conversationBottomPadding}px`,
+                WebkitTouchCallout: 'none',
+              }}
+            >
                 {messagesLoading ? (
                   <div className="space-y-4 p-6">
                     {[0, 1, 2, 3].map((item) => (
@@ -1016,6 +1072,7 @@ export default function Chat({ profile }: ChatProps) {
                                           <CachedImage
                                             src={attachment.url}
                                             alt={attachment.name}
+                                            fallbackMode="media"
                                             wrapperClassName="max-h-72 w-full"
                                             imgClassName="max-h-72 w-full object-contain"
                                           />
@@ -1072,161 +1129,195 @@ export default function Chat({ profile }: ChatProps) {
                 )}
 
                 <div ref={messagesEndRef} />
-              </div>
+            </div>
 
-              <div
-                ref={composerRef}
-                className="absolute inset-x-0 z-20 border-t border-gray-200 bg-[#f0f2f5] px-3 py-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] transition-[bottom,transform] duration-200 ease-out"
-                style={{
-                  bottom: keyboardInset,
-                  paddingBottom: 'max(8px, env(safe-area-inset-bottom))',
-                  transform: inputFocused || keyboardInset > 0 ? 'translateY(-6px)' : 'translateY(0)',
-                }}
-              >
-                {selectedFiles.length > 0 && (
-                  <div className="mb-3 flex flex-wrap gap-2 rounded-2xl bg-white/80 p-2">
-                    {selectedFiles.map((file, index) => (
-                      <div key={`${file.name}-${index}`} className="relative">
-                        <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-gray-200 bg-white p-2 text-center shadow-sm">
-                          {file.type.startsWith('image/') ? (
-                            <CachedImage
-                              src={URL.createObjectURL(file)}
-                              alt={file.name}
-                              wrapperClassName="h-full w-full rounded-xl"
-                              imgClassName="h-full w-full rounded-xl object-cover"
-                            />
-                          ) : (
-                            <div>
-                              <FileIcon size={22} className="mx-auto text-teal-600" />
-                              <p className="mt-1 line-clamp-2 text-[8px] font-bold text-gray-700">{file.name}</p>
-                            </div>
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => removeFile(index)}
-                          className="absolute -right-2 -top-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-white shadow-md"
-                        >
-                          <X size={12} />
-                        </button>
+            <div
+              ref={composerRef}
+              className="z-20 border-t border-black/5 bg-[#f3ede4]/96 px-3 py-2 backdrop-blur-sm transition-transform duration-200 ease-out"
+              style={{
+                paddingBottom: 'max(10px, env(safe-area-inset-bottom))',
+                transform: inputFocused || keyboardInset > 0 ? 'translateY(-1px)' : 'translateY(0)',
+              }}
+            >
+              {inlineError && (
+                <div className="mb-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 shadow-sm">
+                  {inlineError}
+                </div>
+              )}
+              {selectedFiles.length > 0 && (
+                <div className="mb-3 flex flex-wrap gap-2 rounded-2xl bg-white/80 p-2">
+                  {selectedFiles.map((file, index) => (
+                    <div key={`${file.name}-${index}`} className="relative">
+                      <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-gray-200 bg-white p-2 text-center shadow-sm">
+                        {file.type.startsWith('image/') ? (
+                          <CachedImage
+                            src={URL.createObjectURL(file)}
+                            alt={file.name}
+                            fallbackMode="media"
+                            wrapperClassName="h-full w-full rounded-xl"
+                            imgClassName="h-full w-full rounded-xl object-cover"
+                          />
+                        ) : (
+                          <div>
+                            <FileIcon size={22} className="mx-auto text-teal-600" />
+                            <p className="mt-1 line-clamp-2 text-[8px] font-bold text-gray-700">{file.name}</p>
+                          </div>
+                        )}
                       </div>
-                    ))}
-                  </div>
-                )}
-
-                <form onSubmit={handleSendMessage} className="flex items-end gap-2">
-                  <div className="flex items-center gap-1">
-                    <div className="relative" ref={attachmentMenuRef}>
                       <button
                         type="button"
-                        onClick={() => setShowAttachmentMenu((prev) => !prev)}
-                        className={`inline-flex h-11 w-11 items-center justify-center rounded-full transition-all ${
-                          showAttachmentMenu ? 'bg-teal-50 text-teal-600' : 'text-gray-500 hover:bg-gray-200'
-                        }`}
+                        onClick={() => removeFile(index)}
+                        className="absolute -right-2 -top-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-white shadow-md"
                       >
-                        <PlusSquare size={22} />
+                        <X size={12} />
                       </button>
-
-                      <AnimatePresence>
-                        {showAttachmentMenu && (
-                          <motion.div
-                            initial={{ opacity: 0, y: 10, scale: 0.96 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            exit={{ opacity: 0, y: 10, scale: 0.96 }}
-                            className="absolute bottom-full left-0 mb-3 min-w-[200px] rounded-3xl border border-gray-100 bg-white p-2 shadow-xl"
-                          >
-                            <AttachmentMenuButton
-                              icon={<ImageIcon size={18} />}
-                              iconClassName="bg-pink-50 text-pink-600"
-                              label="Camera"
-                              onClick={() => {
-                                fileInputRef.current?.setAttribute('accept', 'image/*');
-                                fileInputRef.current?.setAttribute('capture', 'environment');
-                                fileInputRef.current?.click();
-                                setShowAttachmentMenu(false);
-                              }}
-                            />
-                            <AttachmentMenuButton
-                              icon={<ImageIcon size={18} />}
-                              iconClassName="bg-blue-50 text-blue-600"
-                              label="Photos & Videos"
-                              onClick={() => {
-                                fileInputRef.current?.removeAttribute('capture');
-                                fileInputRef.current?.setAttribute('accept', 'image/*');
-                                fileInputRef.current?.click();
-                                setShowAttachmentMenu(false);
-                              }}
-                            />
-                            <AttachmentMenuButton
-                              icon={<FileIcon size={18} />}
-                              iconClassName="bg-purple-50 text-purple-600"
-                              label="Documents"
-                              onClick={() => {
-                                fileInputRef.current?.removeAttribute('capture');
-                                fileInputRef.current?.setAttribute('accept', '.pdf,.doc,.docx,.txt,.zip');
-                                fileInputRef.current?.click();
-                                setShowAttachmentMenu(false);
-                              }}
-                            />
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
                     </div>
+                  ))}
+                </div>
+              )}
 
-                    <input type="file" multiple ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
-                  </div>
-
-                  <div className="relative flex-1 rounded-[1.75rem] bg-white shadow-sm">
-                    <textarea
-                      ref={inputRef}
-                      rows={1}
-                      value={newMessage}
-                      onChange={(event) => setNewMessage(event.target.value)}
-                      onFocus={() => {
-                        setInputFocused(true);
-                        window.setTimeout(() => {
-                          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-                        }, 120);
-                      }}
-                      onBlur={() => {
-                        window.setTimeout(() => setInputFocused(false), 120);
-                      }}
-                      placeholder={editingMessageId ? 'Edit your message' : 'Type a message'}
-                      autoComplete="off"
-                      autoCorrect="on"
-                      spellCheck
-                      enterKeyHint="send"
-                      className="max-h-40 w-full resize-none overflow-y-auto rounded-[1.75rem] border-transparent bg-transparent px-4 py-3 text-[15px] text-gray-900 caret-teal-600 focus:outline-none focus:ring-0"
-                    />
-                  </div>
-
-                  {(newMessage.trim() || selectedFiles.length > 0) && (
-                    <button
-                      type="submit"
-                      disabled={uploading}
-                      className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-teal-600 text-white shadow-md transition-all hover:bg-teal-700 disabled:bg-gray-400"
-                    >
-                      {uploading ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
-                    </button>
-                  )}
-                </form>
-
-                {editingMessageId && (
-                  <div className="mt-2 flex items-center justify-between rounded-2xl bg-white px-4 py-2 text-xs text-gray-600 shadow-sm">
-                    <span>Editing message</span>
+              <form onSubmit={handleSendMessage} className="flex items-end gap-2">
+                <div className="flex items-center gap-1 self-end pb-1">
+                  <div className="relative" ref={attachmentMenuRef}>
                     <button
                       type="button"
-                      onClick={() => {
-                        setEditingMessageId(null);
-                        setNewMessage('');
-                      }}
-                      className="font-bold text-red-600"
+                      onClick={() => setShowAttachmentMenu((prev) => !prev)}
+                      className={`inline-flex h-10 w-10 items-center justify-center rounded-full transition-all ${
+                        showAttachmentMenu ? 'bg-white text-teal-600 shadow-sm' : 'text-gray-700 hover:bg-white/80'
+                      }`}
                     >
-                      Cancel
+                      <PlusSquare size={21} />
                     </button>
+
+                    <AnimatePresence>
+                      {showAttachmentMenu && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10, scale: 0.96 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: 10, scale: 0.96 }}
+                          className="absolute bottom-full left-0 mb-3 min-w-[200px] rounded-3xl border border-gray-100 bg-white p-2 shadow-xl"
+                        >
+                          <AttachmentMenuButton
+                            icon={<ImageIcon size={18} />}
+                            iconClassName="bg-pink-50 text-pink-600"
+                            label="Camera"
+                            onClick={() => {
+                              fileInputRef.current?.setAttribute('accept', 'image/*');
+                              fileInputRef.current?.setAttribute('capture', 'environment');
+                              fileInputRef.current?.click();
+                              setShowAttachmentMenu(false);
+                            }}
+                          />
+                          <AttachmentMenuButton
+                            icon={<ImageIcon size={18} />}
+                            iconClassName="bg-blue-50 text-blue-600"
+                            label="Photos & Videos"
+                            onClick={() => {
+                              fileInputRef.current?.removeAttribute('capture');
+                              fileInputRef.current?.setAttribute('accept', 'image/*');
+                              fileInputRef.current?.click();
+                              setShowAttachmentMenu(false);
+                            }}
+                          />
+                          <AttachmentMenuButton
+                            icon={<FileIcon size={18} />}
+                            iconClassName="bg-purple-50 text-purple-600"
+                            label="Documents"
+                            onClick={() => {
+                              fileInputRef.current?.removeAttribute('capture');
+                              fileInputRef.current?.setAttribute('accept', '.pdf,.doc,.docx,.txt,.zip');
+                              fileInputRef.current?.click();
+                              setShowAttachmentMenu(false);
+                            }}
+                          />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
+
+                  <input type="file" multiple ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
+                </div>
+
+                <div className="flex flex-1 items-end gap-2 rounded-[1.75rem] bg-white px-1.5 py-1 shadow-[0_1px_2px_rgba(15,23,42,0.08)]">
+                  <textarea
+                    ref={inputRef}
+                    rows={1}
+                    value={newMessage}
+                    onChange={(event) => setNewMessage(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        void handleSendMessage();
+                      }
+                    }}
+                    onFocus={() => {
+                      setInputFocused(true);
+                      window.setTimeout(() => {
+                        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                      }, 120);
+                    }}
+                    onBlur={() => {
+                      window.setTimeout(() => setInputFocused(false), 120);
+                    }}
+                    placeholder={editingMessageId ? 'Edit your message' : 'Type a message'}
+                    autoComplete="off"
+                    autoCorrect="on"
+                    spellCheck
+                    enterKeyHint="send"
+                    className="max-h-32 min-h-[40px] w-full resize-none overflow-y-auto rounded-[1.75rem] border-transparent bg-transparent px-3 py-2.5 text-[15px] leading-5 text-gray-900 caret-teal-600 focus:outline-none focus:ring-0"
+                  />
+
+                  {!hasComposerValue && (
+                    <div className="flex items-center gap-1 self-center pr-1 text-gray-600">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          fileInputRef.current?.removeAttribute('capture');
+                          fileInputRef.current?.setAttribute('accept', 'image/*');
+                          fileInputRef.current?.click();
+                        }}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-full transition hover:bg-gray-100"
+                        aria-label="Open camera"
+                      >
+                        <Camera size={19} />
+                      </button>
+                      <button
+                        type="button"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-full transition hover:bg-gray-100"
+                        aria-label="Voice note"
+                      >
+                        <Mic size={18} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {hasComposerValue && (
+                  <button
+                    type="submit"
+                    disabled={uploading}
+                    className="inline-flex h-11 w-11 items-center justify-center self-end rounded-full bg-teal-600 text-white shadow-md transition-all hover:bg-teal-700 disabled:bg-gray-400"
+                  >
+                    {uploading ? <Loader2 size={19} className="animate-spin" /> : <Send size={19} />}
+                  </button>
                 )}
-              </div>
+              </form>
+
+              {editingMessageId && (
+                <div className="mt-2 flex items-center justify-between rounded-2xl bg-white px-4 py-2 text-xs text-gray-600 shadow-sm">
+                  <span>Editing message</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingMessageId(null);
+                      setNewMessage('');
+                    }}
+                    className="font-bold text-red-600"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
             </div>
           </>
         ) : (
@@ -1301,6 +1392,7 @@ export default function Chat({ profile }: ChatProps) {
                       <CachedImage
                         src={user.photoURL}
                         alt={user.displayName}
+                        fallbackMode="avatar"
                         wrapperClassName="h-12 w-12 rounded-2xl border border-gray-200 bg-gray-100"
                         imgClassName="h-full w-full rounded-2xl object-cover"
                       />

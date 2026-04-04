@@ -1,5 +1,5 @@
 import { supabase } from '../supabase';
-import { UserProfile, Post, Job, Message, Proposal, Attachment, FriendRequest, Connection, Wallet, WalletTransaction, WalletCurrency, AppNotification, PostLike, PostComment, NotificationSettings, PostCommentLike, MarketItem, MarketSettings, MarketSellerRating, CompanyPartnerRequest, ActiveGig } from '../types';
+import { UserProfile, Post, Job, Message, Proposal, Attachment, FriendRequest, Connection, Wallet, WalletTransaction, WalletCurrency, AppNotification, PostLike, PostComment, NotificationSettings, PostCommentLike, MarketItem, MarketSettings, MarketSellerRating, CompanyPartnerRequest, ActiveGig, AppPreferences, ConnectedDevice, UserPerformanceSummary } from '../types';
 import { getCartoonAvatar } from '../utils/avatar';
 import { getUploadOptimizationOptions, optimizeImageFile } from '../utils/image';
 
@@ -206,6 +206,7 @@ type DbPostCommentNotificationRow = {
 };
 
 const NOTIFICATION_SETTINGS_KEY_PREFIX = 'connect_notification_settings_';
+const APP_PREFERENCES_KEY_PREFIX = 'connect_app_preferences_';
 const CHAT_READ_KEY_PREFIX = 'connect_chat_read_map_';
 const CHAT_READ_EVENT = 'connect:chat-read-updated';
 const CHAT_CLEAR_KEY_PREFIX = 'connect_chat_cleared_map_';
@@ -239,11 +240,15 @@ type FeedCacheSnapshot = {
   profileByUid: Record<string, UserProfile>;
 };
 
+type DeviceSeed = Omit<ConnectedDevice, 'lastActiveAt'>;
+
 type ActiveChatSummary = {
   otherUid: string;
   user: UserProfile;
   lastMessage: string;
   updatedAt: string;
+  lastMessageSenderUid?: string;
+  lastMessageReadAt?: string;
 };
 
 const memoryCache = new Map<string, CacheEntry<unknown>>();
@@ -568,6 +573,37 @@ function loadJsonFromStorage<T>(key: string, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function getDefaultConnectedDevices(): ConnectedDevice[] {
+  const now = new Date().toISOString();
+  const seeds: DeviceSeed[] = [
+    {
+      id: 'current-session',
+      label: 'Current browser session',
+      platform: typeof navigator !== 'undefined' ? navigator.userAgent : 'Browser',
+      current: true,
+    },
+    {
+      id: 'mobile-sync',
+      label: 'Mobile app sync',
+      platform: 'Connect Mobile',
+      current: false,
+    },
+  ];
+
+  return seeds.map((seed, index) => ({
+    ...seed,
+    lastActiveAt: new Date(Date.now() - index * 1000 * 60 * 45).toISOString(),
+  }));
+}
+
+function getDefaultAppPreferences(): AppPreferences {
+  return {
+    language: 'en-US',
+    appearance: 'system',
+    connectedDevices: getDefaultConnectedDevices(),
+  };
 }
 
 function getConversationKey(uid: string, otherUid: string) {
@@ -1013,7 +1049,45 @@ export const supabaseService = {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(`${NOTIFICATION_SETTINGS_KEY_PREFIX}${uid}`, JSON.stringify(next));
     }
+    removeCache(`notifications:${uid}`);
     return next;
+  },
+
+  getAppPreferences(uid: string): AppPreferences {
+    const stored = loadJsonFromStorage<Partial<AppPreferences>>(`${APP_PREFERENCES_KEY_PREFIX}${uid}`, {});
+    const defaults = getDefaultAppPreferences();
+
+    return {
+      language: stored.language || defaults.language,
+      appearance: stored.appearance || defaults.appearance,
+      connectedDevices:
+        stored.connectedDevices?.length
+          ? stored.connectedDevices.map((device, index) => ({
+              id: device.id || `device-${index + 1}`,
+              label: device.label || `Device ${index + 1}`,
+              platform: device.platform || 'Unknown device',
+              lastActiveAt: device.lastActiveAt || new Date().toISOString(),
+              current: !!device.current,
+            }))
+          : defaults.connectedDevices,
+    };
+  },
+
+  updateAppPreferences(uid: string, updates: Partial<AppPreferences>): AppPreferences {
+    const next = {
+      ...this.getAppPreferences(uid),
+      ...updates,
+    };
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(`${APP_PREFERENCES_KEY_PREFIX}${uid}`, JSON.stringify(next));
+    }
+    return next;
+  },
+
+  removeConnectedDevice(uid: string, deviceId: string): AppPreferences {
+    const current = this.getAppPreferences(uid);
+    const nextDevices = current.connectedDevices.filter((device) => device.id !== deviceId || device.current);
+    return this.updateAppPreferences(uid, { connectedDevices: nextDevices });
   },
 
   getFeedCacheSnapshot(): FeedCacheSnapshot | null {
@@ -1971,6 +2045,55 @@ export const supabaseService = {
     return mapped;
   },
 
+  async getUserPerformanceSummaries(uids: string[]): Promise<Record<string, UserPerformanceSummary>> {
+    const uniqueUids = Array.from(new Set(uids.filter(Boolean)));
+    if (uniqueUids.length === 0) return {};
+
+    const cacheKey = `users:performance:${uniqueUids.slice().sort().join(',')}`;
+    const cached = readCache<Record<string, UserPerformanceSummary>>(cacheKey, CACHE_TTL.interactions);
+    if (cached) return cached;
+
+    const [proposalRows, ratings] = await Promise.all([
+      runQuery<DbProposal[]>(
+        supabase
+          .from('proposals')
+          .select('*')
+          .eq('status', 'accepted')
+          .in('freelancer_uid', uniqueUids),
+        'getUserPerformanceSummaries:proposals'
+      ),
+      this.listMarketSellerRatings(),
+    ]);
+
+    const summary: Record<string, UserPerformanceSummary> = {};
+    uniqueUids.forEach((uid) => {
+      summary[uid] = {
+        gigsCompleted: 0,
+        ratingAverage: 0,
+        ratingCount: 0,
+      };
+    });
+
+    proposalRows.forEach((proposal) => {
+      if (!summary[proposal.freelancer_uid]) return;
+      summary[proposal.freelancer_uid].gigsCompleted += 1;
+    });
+
+    ratings.forEach((rating) => {
+      if (!summary[rating.sellerUid]) return;
+      summary[rating.sellerUid].ratingAverage += rating.rating;
+      summary[rating.sellerUid].ratingCount += 1;
+    });
+
+    uniqueUids.forEach((uid) => {
+      const item = summary[uid];
+      item.ratingAverage = item.ratingCount > 0 ? Number((item.ratingAverage / item.ratingCount).toFixed(1)) : 0;
+    });
+
+    writeCache(cacheKey, summary);
+    return summary;
+  },
+
   subscribeToMarketSellerRatings(callback: (ratings: MarketSellerRating[]) => void, onError?: (error: any) => void) {
     const fetcher = async () => this.listMarketSellerRatings();
     return subscribeToTable('market_seller_ratings', fetcher, callback, undefined, onError, 'market:seller-ratings');
@@ -1993,6 +2116,7 @@ export const supabaseService = {
       'upsertMarketSellerRating'
     );
     removeCache('market:seller-ratings');
+    removeCacheByPrefix('users:performance:');
   },
 
   async getMarketSettings(uid: string): Promise<MarketSettings> {
@@ -2172,48 +2296,56 @@ export const supabaseService = {
     const lastMessageText =
       message.content || (message.attachments && message.attachments.length > 0 ? 'Attachment' : '');
 
-    await runQuery(
-      supabase.from('active_chats').upsert(
-        [
-          {
-            user_uid: message.senderUid,
-            other_uid: message.receiverUid,
-            last_message: lastMessageText,
-            updated_at: createdAt,
-          },
-          {
-            user_uid: message.receiverUid,
-            other_uid: message.senderUid,
-            last_message: lastMessageText,
-            updated_at: createdAt,
-          },
-        ],
-        { onConflict: 'user_uid,other_uid' }
-      ),
-      'updateActiveChats'
-    );
+    try {
+      await runQuery(
+        supabase.from('active_chats').upsert(
+          [
+            {
+              user_uid: message.senderUid,
+              other_uid: message.receiverUid,
+              last_message: lastMessageText,
+              updated_at: createdAt,
+            },
+            {
+              user_uid: message.receiverUid,
+              other_uid: message.senderUid,
+              last_message: lastMessageText,
+              updated_at: createdAt,
+            },
+          ],
+          { onConflict: 'user_uid,other_uid' }
+        ),
+        'updateActiveChats'
+      );
 
-    const senderProfile =
-      this.profileCache.get(message.senderUid) || (await this.getUserProfile(message.senderUid));
-    const receiverProfile =
-      this.profileCache.get(message.receiverUid) || (await this.getUserProfile(message.receiverUid));
+      const senderProfile =
+        this.profileCache.get(message.senderUid) || (await this.getUserProfile(message.senderUid));
+      const receiverProfile =
+        this.profileCache.get(message.receiverUid) || (await this.getUserProfile(message.receiverUid));
 
-    if (receiverProfile) {
-      this.upsertActiveChatCache(message.senderUid, {
-        otherUid: receiverProfile.uid,
-        user: receiverProfile,
-        lastMessage: lastMessageText,
-        updatedAt: createdAt,
-      });
-    }
+      if (receiverProfile) {
+        this.upsertActiveChatCache(message.senderUid, {
+          otherUid: receiverProfile.uid,
+          user: receiverProfile,
+          lastMessage: lastMessageText,
+          updatedAt: createdAt,
+          lastMessageSenderUid: message.senderUid,
+          lastMessageReadAt: undefined,
+        });
+      }
 
-    if (senderProfile) {
-      this.upsertActiveChatCache(message.receiverUid, {
-        otherUid: senderProfile.uid,
-        user: senderProfile,
-        lastMessage: lastMessageText,
-        updatedAt: createdAt,
-      });
+      if (senderProfile) {
+        this.upsertActiveChatCache(message.receiverUid, {
+          otherUid: senderProfile.uid,
+          user: senderProfile,
+          lastMessage: lastMessageText,
+          updatedAt: createdAt,
+          lastMessageSenderUid: message.senderUid,
+          lastMessageReadAt: undefined,
+        });
+      }
+    } catch (error) {
+      console.error('Post-send chat sync failed:', error);
     }
 
     return mapMessageFromDb(inserted);
@@ -2595,21 +2727,40 @@ export const supabaseService = {
     const otherUids = normalizedRows.map((r) => r.other_uid as string);
     if (otherUids.length === 0) return [];
 
+    const messageRows = await runQuery<DbMessage[]>(
+      supabase
+        .from('messages')
+        .select('*')
+        .or(`sender_uid.eq.${uid},receiver_uid.eq.${uid}`)
+        .order('created_at', { ascending: false })
+        .limit(300),
+      'fetchActiveChats:messages'
+    );
+    const latestMessageByOtherUid = new Map<string, DbMessage>();
+    messageRows.forEach((row) => {
+      const otherUid = row.sender_uid === uid ? row.receiver_uid : row.sender_uid;
+      if (!otherUid || latestMessageByOtherUid.has(otherUid)) return;
+      latestMessageByOtherUid.set(otherUid, row);
+    });
+
     const profiles = await this.getUsersByUids(otherUids);
-    const profileMap = new Map(profiles.map((p) => [p.uid, p]));
+    const profileMap = new Map<string, UserProfile>(profiles.map((p) => [p.uid, p]));
 
     const mapped = normalizedRows
-      .map((chat) => {
+      .map((chat): ActiveChatSummary | null => {
         const user = profileMap.get(chat.other_uid);
         if (!user) return null;
+        const latestMessage = latestMessageByOtherUid.get(chat.other_uid);
         return {
           lastMessage: typeof chat.last_message === 'string' ? chat.last_message : '',
           updatedAt: typeof chat.updated_at === 'string' ? chat.updated_at : new Date().toISOString(),
           otherUid: chat.other_uid as string,
           user,
+          lastMessageSenderUid: latestMessage?.sender_uid,
+          lastMessageReadAt: latestMessage?.read_at || undefined,
         };
       })
-      .filter((c): c is ActiveChatSummary => {
+      .filter((c): c is NonNullable<typeof c> => {
         if (!c) return false;
         const clearedAt = getConversationClearedAt(uid, c.otherUid);
         return !clearedAt || new Date(c.updatedAt).getTime() > new Date(clearedAt).getTime();
@@ -2686,7 +2837,7 @@ export const supabaseService = {
       'getRecentConversations'
     );
 
-    const convoMap = new Map<string, { lastMessage: string; updatedAt: string }>();
+    const convoMap = new Map<string, { lastMessage: string; updatedAt: string; lastMessageSenderUid?: string; lastMessageReadAt?: string }>();
     rows.forEach((msg) => {
       const otherUid = msg.sender_uid === uid ? msg.receiver_uid : msg.sender_uid;
       if (!otherUid) return;
@@ -2694,6 +2845,8 @@ export const supabaseService = {
         convoMap.set(otherUid, {
           lastMessage: msg.content || (Array.isArray(msg.attachments) && msg.attachments.length > 0 ? 'Attachment' : ''),
           updatedAt: msg.created_at || new Date().toISOString(),
+          lastMessageSenderUid: msg.sender_uid,
+          lastMessageReadAt: msg.read_at || undefined,
         });
       }
     });
@@ -2702,10 +2855,10 @@ export const supabaseService = {
     if (otherUids.length === 0) return [];
 
     const profiles = await this.getUsersByUids(otherUids);
-    const profileMap = new Map(profiles.map((p) => [p.uid, p]));
+    const profileMap = new Map<string, UserProfile>(profiles.map((p) => [p.uid, p]));
 
     const mapped = otherUids
-      .map((otherUid) => {
+      .map((otherUid): ActiveChatSummary | null => {
         const user = profileMap.get(otherUid);
         if (!user) return null;
         const convo = convoMap.get(otherUid)!;
@@ -2714,9 +2867,11 @@ export const supabaseService = {
           user,
           lastMessage: convo.lastMessage,
           updatedAt: convo.updatedAt,
+          lastMessageSenderUid: convo.lastMessageSenderUid,
+          lastMessageReadAt: convo.lastMessageReadAt,
         };
       })
-      .filter((c): c is ActiveChatSummary => {
+      .filter((c): c is NonNullable<typeof c> => {
         if (!c) return false;
         const clearedAt = getConversationClearedAt(uid, c.otherUid);
         return !clearedAt || new Date(c.updatedAt).getTime() > new Date(clearedAt).getTime();
@@ -3232,6 +3387,7 @@ export const supabaseService = {
     removeCache('jobs:all');
     removeCacheByPrefix('proposals:job:');
     removeCacheByPrefix('gigs:active:');
+    removeCacheByPrefix('users:performance:');
   },
 
   async updateProposalStatus(proposalId: string, status: 'pending' | 'accepted' | 'rejected') {
@@ -3281,6 +3437,7 @@ export const supabaseService = {
     removeCacheByPrefix('jobs:client:');
     removeCache(`proposals:job:${proposal.job_id}`);
     removeCacheByPrefix('gigs:active:');
+    removeCacheByPrefix('users:performance:');
   },
 
   async hasAppliedToJob(jobId: string, freelancerUid: string): Promise<boolean> {

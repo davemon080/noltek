@@ -171,7 +171,7 @@ export default function JobBoard({ profile }: JobBoardProps) {
       </div>
 
       {/* Jobs List */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <AnimatePresence mode="popLayout">
           {filteredJobs.length > 0 ? (
             filteredJobs.map((job) => (
@@ -181,14 +181,15 @@ export default function JobBoard({ profile }: JobBoardProps) {
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
-                className="bg-white p-5 sm:p-6 rounded-3xl shadow-sm border border-gray-200 hover:border-teal-200 hover:shadow-md transition-all group flex flex-col"
+                className="group flex flex-col rounded-[1.75rem] border border-gray-200 bg-white p-4 shadow-sm transition-all hover:border-teal-200 hover:shadow-md sm:p-5"
               >
                 {companyByUid[job.clientUid] && (
-                  <div className="mb-4 flex items-center gap-3">
+                  <div className="mb-3 flex items-center gap-3">
                     <CachedImage
                       src={companyByUid[job.clientUid].companyLogoUrl}
                       alt={companyByUid[job.clientUid].companyName}
-                      wrapperClassName="h-11 w-11 rounded-2xl bg-gray-100"
+                      fallbackMode="logo"
+                      wrapperClassName="h-10 w-10 rounded-2xl bg-gray-100"
                       imgClassName="h-full w-full rounded-2xl object-cover"
                     />
                     <div>
@@ -197,28 +198,28 @@ export default function JobBoard({ profile }: JobBoardProps) {
                     </div>
                   </div>
                 )}
-                <div className="flex items-start justify-between mb-4">
-                  <div className="bg-teal-50 p-3 rounded-2xl text-teal-700 group-hover:bg-teal-600 group-hover:text-white transition-colors">
-                    <Briefcase size={24} />
+                <div className="mb-3 flex items-start justify-between">
+                  <div className="rounded-2xl bg-teal-50 p-2.5 text-teal-700 transition-colors group-hover:bg-teal-600 group-hover:text-white">
+                    <Briefcase size={20} />
                   </div>
                   <div className="text-right">
-                    <p className="text-xl font-bold text-teal-700">{formatMoneyFromUSD(job.budget, currency)}</p>
+                    <p className="text-lg font-bold text-teal-700">{formatMoneyFromUSD(job.budget, currency)}</p>
                     <p className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Fixed Price</p>
                   </div>
                 </div>
                 
-                <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-2 group-hover:text-teal-700 transition-colors">{job.title}</h3>
-                <p className="text-gray-600 text-sm mb-6 line-clamp-3 flex-1">{job.description}</p>
+                <h3 className="mb-2 text-base font-bold text-gray-900 transition-colors group-hover:text-teal-700 sm:text-lg">{job.title}</h3>
+                <p className="mb-4 flex-1 line-clamp-3 text-sm text-gray-600">{job.description}</p>
                 
-                <div className="flex flex-wrap gap-2 sm:gap-3 mb-6">
-                  <span className="flex items-center gap-1 text-[10px] sm:text-xs font-bold text-gray-500 bg-gray-50 px-3 py-1.5 rounded-xl">
+                <div className="mb-4 flex flex-wrap gap-2">
+                  <span className="flex items-center gap-1 rounded-xl bg-gray-50 px-2.5 py-1.5 text-[10px] font-bold text-gray-500 sm:text-xs">
                     <MapPin size={12} /> {job.isRemote ? 'Remote' : 'On-site'}
                   </span>
-                  <span className="flex items-center gap-1 text-[10px] sm:text-xs font-bold text-gray-500 bg-gray-50 px-3 py-1.5 rounded-xl">
+                  <span className="flex items-center gap-1 rounded-xl bg-gray-50 px-2.5 py-1.5 text-[10px] font-bold text-gray-500 sm:text-xs">
                     <Clock size={12} /> {formatDistanceToNow(new Date(job.createdAt), { addSuffix: true })}
                   </span>
                   {job.isStudentFriendly && (
-                    <span className="flex items-center gap-1 text-[10px] sm:text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-xl">
+                    <span className="flex items-center gap-1 rounded-xl bg-emerald-50 px-2.5 py-1.5 text-[10px] font-bold text-emerald-600 sm:text-xs">
                       <CheckCircle size={12} /> Student Friendly
                     </span>
                   )}
@@ -227,7 +228,7 @@ export default function JobBoard({ profile }: JobBoardProps) {
                 <div className="flex items-center gap-2">
                   <Link
                     to={`/jobs/${job.id}`}
-                    className="flex-1 text-center bg-gray-900 text-white font-bold py-3 px-4 rounded-2xl hover:bg-teal-700 transition-all text-sm sm:text-base"
+                    className="flex-1 rounded-2xl bg-gray-900 px-4 py-2.5 text-center text-sm font-bold text-white transition-all hover:bg-teal-700"
                   >
                     View Details & Apply
                   </Link>

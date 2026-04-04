@@ -100,6 +100,7 @@ export default function JobDetails({ profile }: JobDetailsProps) {
             <CachedImage
               src={client.photoURL}
               alt={client.displayName}
+              fallbackMode="avatar"
               wrapperClassName="w-12 h-12 rounded-xl"
               imgClassName="w-full h-full rounded-xl object-cover"
             />

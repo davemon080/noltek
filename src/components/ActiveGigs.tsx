@@ -175,6 +175,7 @@ export default function ActiveGigs({ profile }: ActiveGigsProps) {
                           <CachedImage
                             src={counterpart.photoURL}
                             alt={counterpart.displayName}
+                            fallbackMode="avatar"
                             wrapperClassName="h-14 w-14 rounded-2xl border border-gray-200 bg-white"
                             imgClassName="h-full w-full rounded-2xl object-cover"
                           />

@@ -174,6 +174,7 @@ export default function Profile({ profile: loggedInProfile }: ProfileProps) {
                 <CachedImage
                   src={companyPartner.companyLogoUrl}
                   alt={companyPartner.companyName}
+                  fallbackMode="logo"
                   loading="lazy"
                   decoding="async"
                   referrerPolicy="no-referrer"
@@ -231,6 +232,7 @@ export default function Profile({ profile: loggedInProfile }: ProfileProps) {
                         <CachedImage
                           src={post.imageUrl}
                           alt="company post"
+                          fallbackMode="post"
                           loading="lazy"
                           decoding="async"
                           wrapperClassName="w-full mt-3 rounded-2xl"
@@ -333,6 +335,7 @@ export default function Profile({ profile: loggedInProfile }: ProfileProps) {
               <CachedImage
                 src={(editing ? draft.photoURL : userProfile.photoURL) || ''}
                 alt={userProfile.displayName}
+                fallbackMode="avatar"
                 loading="lazy"
                 decoding="async"
                 referrerPolicy="no-referrer"
@@ -455,27 +458,6 @@ export default function Profile({ profile: loggedInProfile }: ProfileProps) {
                 </div>
               </section>
 
-              <section className="space-y-3">
-                <p className="text-sm font-bold text-gray-900">All Posts</p>
-                {posts.length === 0 && <p className="text-sm text-gray-500">No posts yet.</p>}
-                {posts.map((post) => (
-                  <div key={post.id} className="p-4 border border-gray-100 rounded-2xl">
-                    <p className="text-xs text-gray-400 mb-2">{formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })}</p>
-                    <p className="text-sm text-gray-800 whitespace-pre-wrap">{post.content}</p>
-                    {post.imageUrl && (
-                      <CachedImage
-                        src={post.imageUrl}
-                        alt="post"
-                        loading="lazy"
-                        decoding="async"
-                        wrapperClassName="w-full mt-3 rounded-xl"
-                        imgClassName="w-full h-full rounded-xl object-cover"
-                      />
-                    )}
-                  </div>
-                ))}
-              </section>
-
               <section className="space-y-4">
                 <button
                   type="button"
@@ -559,6 +541,7 @@ export default function Profile({ profile: loggedInProfile }: ProfileProps) {
                     <CachedImage
                       src={item.imageUrl || 'https://via.placeholder.com/600x400?text=Project'}
                       alt={item.title}
+                      fallbackMode="media"
                       loading="lazy"
                       decoding="async"
                       wrapperClassName="w-full h-44 rounded-xl"
@@ -592,6 +575,7 @@ export default function Profile({ profile: loggedInProfile }: ProfileProps) {
                     <CachedImage
                       src={post.imageUrl}
                       alt="post"
+                      fallbackMode="post"
                       loading="lazy"
                       decoding="async"
                       wrapperClassName="w-full mt-3 rounded-xl"
@@ -602,6 +586,51 @@ export default function Profile({ profile: loggedInProfile }: ProfileProps) {
               ))}
             </div>
           )}
+
+          <section className="rounded-[2rem] border border-gray-200 bg-white p-5 shadow-sm md:p-6">
+            <div className="flex flex-col gap-2 border-b border-gray-100 pb-4 md:flex-row md:items-end md:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.24em] text-gray-400">Bottom Section</p>
+                <h3 className="mt-2 text-lg font-bold text-gray-900">All Posts</h3>
+              </div>
+              <p className="text-sm text-gray-500">
+                {posts.length === 0 ? 'No posts published yet.' : `${posts.length} post${posts.length === 1 ? '' : 's'} from this profile`}
+              </p>
+            </div>
+
+            {posts.length === 0 ? (
+              <div className="rounded-3xl bg-gray-50 px-4 py-10 text-center text-sm text-gray-500">
+                This profile has not shared any posts yet.
+              </div>
+            ) : (
+              <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-2">
+                {posts.map((post) => (
+                  <article key={post.id} className="flex h-full flex-col rounded-3xl border border-gray-100 bg-gray-50/60 p-4">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <span className="rounded-full bg-white px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-teal-700 shadow-sm">
+                        {post.type}
+                      </span>
+                      <span className="text-xs text-gray-400">
+                        {formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })}
+                      </span>
+                    </div>
+                    <p className="text-sm leading-7 text-gray-800 whitespace-pre-wrap">{post.content}</p>
+                    {post.imageUrl && (
+                      <CachedImage
+                        src={post.imageUrl}
+                        alt="post"
+                        fallbackMode="post"
+                        loading="lazy"
+                        decoding="async"
+                        wrapperClassName="mt-4 w-full overflow-hidden rounded-2xl"
+                        imgClassName="h-full w-full rounded-2xl object-cover"
+                      />
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
         </div>
       </div>
     </div>

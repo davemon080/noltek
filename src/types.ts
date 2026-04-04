@@ -209,6 +209,30 @@ export interface NotificationSettings {
   friendRequests: boolean;
 }
 
+export type AppLanguage = 'en-US' | 'en-GB' | 'fr-FR';
+
+export type AppearanceMode = 'light' | 'dark' | 'system';
+
+export interface ConnectedDevice {
+  id: string;
+  label: string;
+  platform: string;
+  lastActiveAt: string;
+  current: boolean;
+}
+
+export interface AppPreferences {
+  language: AppLanguage;
+  appearance: AppearanceMode;
+  connectedDevices: ConnectedDevice[];
+}
+
+export interface UserPerformanceSummary {
+  gigsCompleted: number;
+  ratingAverage: number;
+  ratingCount: number;
+}
+
 export interface PostLike {
   id: string;
   postId: string;

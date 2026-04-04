@@ -167,6 +167,7 @@ export default function Comments({ profile }: CommentsProps) {
             <CachedImage
               src={displayProfile?.photoURL || comment.authorPhoto}
               alt={comment.authorName}
+              fallbackMode="avatar"
               loading="lazy"
               decoding="async"
               referrerPolicy="no-referrer"
@@ -307,6 +308,7 @@ export default function Comments({ profile }: CommentsProps) {
                 <CachedImage
                   src={profileByUid[post.authorUid]?.photoURL || post.authorPhoto}
                   alt={post.authorName}
+                  fallbackMode="avatar"
                   loading="lazy"
                   decoding="async"
                   referrerPolicy="no-referrer"

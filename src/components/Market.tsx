@@ -140,7 +140,7 @@ export default function Market({ profile }: MarketProps) {
                     onClick={() => navigate(`/market/${item.id}`)}
                     className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50"
                   >
-                    <CachedImage src={item.imageUrls[0]} alt={item.title} wrapperClassName="h-10 w-10 rounded-xl" imgClassName="h-full w-full rounded-xl object-cover" />
+                    <CachedImage src={item.imageUrls[0]} alt={item.title} fallbackMode="media" wrapperClassName="h-10 w-10 rounded-xl" imgClassName="h-full w-full rounded-xl object-cover" />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-bold text-gray-900">{item.title}</p>
                       <p className="truncate text-xs text-gray-500">{item.category} · {formatAmountInCurrency(item.price, item.priceCurrency, currency)}</p>
@@ -196,17 +196,18 @@ export default function Market({ profile }: MarketProps) {
       </div>
 
       {filteredItems.length > 0 ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
           {filteredItems.map((item, index) => (
             <Link
               key={item.id}
               to={`/market/${item.id}`}
-              className="overflow-hidden rounded-[2rem] border border-gray-200 bg-white shadow-sm transition-all hover:-translate-y-1 hover:border-teal-200 hover:shadow-lg"
+              className="overflow-hidden rounded-[1.5rem] border border-gray-200 bg-white shadow-sm transition-all hover:-translate-y-1 hover:border-teal-200 hover:shadow-lg"
             >
-              <div className="aspect-[4/3] bg-gray-100">
+              <div className="aspect-square bg-gray-100">
                 <CachedImage
                   src={item.imageUrls[0]}
                   alt={item.title}
+                  fallbackMode="media"
                   loading={index < 4 ? 'eager' : 'lazy'}
                   decoding="async"
                   fetchPriority={index < 4 ? 'high' : 'auto'}
@@ -216,22 +217,22 @@ export default function Market({ profile }: MarketProps) {
                 />
               </div>
 
-              <div className="space-y-3 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
+              <div className="space-y-2.5 p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
                     <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">{item.category}</p>
-                    <h2 className="line-clamp-2 text-base font-bold text-gray-900">{item.title}</h2>
+                    <h2 className="line-clamp-2 text-sm font-bold text-gray-900 sm:text-base">{item.title}</h2>
                   </div>
                   {item.isNegotiable && (
-                    <span className="shrink-0 rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-700">
+                    <span className="shrink-0 rounded-full bg-amber-50 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-amber-700">
                       Negotiable
                     </span>
                   )}
                 </div>
 
-                <p className="text-xl font-black text-teal-700">{formatAmountInCurrency(item.price, item.priceCurrency, currency)}</p>
+                <p className="text-base font-black text-teal-700 sm:text-lg">{formatAmountInCurrency(item.price, item.priceCurrency, currency)}</p>
 
-                <div className="flex items-center justify-between gap-3 text-xs text-gray-500">
+                <div className="flex flex-col gap-2 text-xs text-gray-500">
                   <div className="min-w-0">
                     <p className="truncate font-semibold text-gray-700">
                       {item.isAnonymous ? 'Anonymous Seller' : item.seller?.displayName || 'Seller'}
@@ -247,7 +248,7 @@ export default function Market({ profile }: MarketProps) {
                       </span>
                     </div>
                   </div>
-                  <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 font-semibold text-gray-600">
+                  <span className="inline-flex w-fit items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 font-semibold text-gray-600">
                     <Tag size={12} />
                     {item.stockQuantity} in stock
                   </span>
